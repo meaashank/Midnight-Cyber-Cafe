@@ -179,7 +179,7 @@ const INITIAL_STICKY_NOTES: StickyNote[] = [
   },
   {
     id: 'sticky_3',
-    text: `AIM Screen Names:\nxXSarahXx (bestie)\nHaloMaster (LAN partner)\nsk8rboi2004 (Tony Hawk)`,
+    text: `AIM Screen Names:\nxX_bhavya_core_Xx (bestie)\nHaloMaster (LAN partner)\nsk8rboi2004 (Tony Hawk)`,
     color: 'cyan',
     position: { x: 1070, y: 460 },
     rotation: -2.0,
@@ -203,7 +203,19 @@ export default function App() {
     try {
       const saved = sessionStorage.getItem('cyber_cafe_sticky_notes');
       if (saved) {
-        return JSON.parse(saved);
+        const parsed: StickyNote[] = JSON.parse(saved);
+        // Ensure any existing stored sticky notes get migrated to the new creative username
+        return parsed.map((note) => {
+          if (note.text && (note.text.includes('Sarah') || note.text.includes('xXSarahXx'))) {
+            return {
+              ...note,
+              text: note.text
+                .replace(/xXSarahXx/g, 'xX_bhavya_core_Xx')
+                .replace(/Sarah/g, 'bhavya'),
+            };
+          }
+          return note;
+        });
       }
     } catch {
       // ignore

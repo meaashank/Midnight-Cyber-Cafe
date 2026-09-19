@@ -1014,7 +1014,7 @@ export const InternetExplorerApp: React.FC = () => {
                       <div className="grid grid-cols-4 gap-2 text-center text-[9px]">
                         {[
                           { name: 'Tom', title: 'Your first friend' },
-                          { name: 'xXSarahXx', title: 'bestie 4ever' },
+                          { name: 'xX_bhavya_core_Xx', title: 'bestie 4ever' },
                           { name: 'sk8rboi', title: 'skate crew' },
                           { name: 'HaloMaster', title: 'LAN partner' },
                           { name: 'punkrockgirl', title: 'concert buddy' },

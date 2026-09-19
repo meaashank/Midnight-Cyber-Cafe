@@ -16,7 +16,7 @@ interface AimAppProps {
 
 const INITIAL_BUDDIES: AimBuddy[] = [
   { screenName: 'sk8rboi2004', status: 'online', statusMessage: 'landing kickflips at the park later' },
-  { screenName: 'xXSarahXx', status: 'online', statusMessage: 'listening to Evanescence 🎵' },
+  { screenName: 'xX_bhavya_core_Xx', status: 'online', statusMessage: 'listening to Evanescence 🎵' },
   { screenName: 'HaloMaster', status: 'away', statusMessage: 'playing Halo 2 on Xbox Live brb' },
   { screenName: 'punkrockgirl', status: 'online', statusMessage: 'homework is so annoying' },
   { screenName: 'Mike', status: 'away', statusMessage: 'eating dinner / afk' },
@@ -31,7 +31,7 @@ const BOT_RESPONSES: Record<string, string[]> = {
     'did you see that crazy Tony Hawk trick on MTV?',
     'gtg mom needs the phone line lol'
   ],
-  xXSarahXx: [
+  xX_bhavya_core_Xx: [
     'heyyy! did you do the chemistry worksheet?',
     'omg winamp is playing my favorite song right now',
     'check out my new MySpace background layout I coded it with HTML tables haha',
@@ -56,17 +56,17 @@ const BOT_RESPONSES: Record<string, string[]> = {
 
 export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
   const [buddies] = useState<AimBuddy[]>(INITIAL_BUDDIES);
-  const [selectedBuddy, setSelectedBuddy] = useState<string>('xXSarahXx');
+  const [selectedBuddy, setSelectedBuddy] = useState<string>('xX_bhavya_core_Xx');
   const [myStatusMessage, setMyStatusMessage] = useState<string>('listening to music @ cyber cafe');
   const [myStatus, setMyStatus] = useState<'online' | 'away'>('online');
   const [inputText, setInputText] = useState('');
   const [isBuzzing, setIsBuzzing] = useState(false);
 
   const [chatHistory, setChatHistory] = useState<Record<string, AimMessage[]>>({
-    xXSarahXx: [
-      { id: '1', from: 'xXSarahXx', text: 'hey are you still at Cabin 04?', time: '10:42 PM' },
+    xX_bhavya_core_Xx: [
+      { id: '1', from: 'xX_bhavya_core_Xx', text: 'hey are you still at Cabin 04?', time: '10:42 PM' },
       { id: '2', from: 'me', text: 'yeah, downloaded some songs on Winamp', time: '10:43 PM' },
-      { id: '3', from: 'xXSarahXx', text: 'send me that Linkin park track if it finishes!', time: '10:44 PM' },
+      { id: '3', from: 'xX_bhavya_core_Xx', text: 'send me that Linkin park track if it finishes!', time: '10:44 PM' },
     ],
     sk8rboi2004: [
       { id: '1', from: 'sk8rboi2004', text: 'yo log into Counter-Strike server 192.168.1.104', time: '10:30 PM' },
