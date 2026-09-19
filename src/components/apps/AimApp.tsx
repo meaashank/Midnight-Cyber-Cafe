@@ -73,10 +73,13 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
     ],
   });
 
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Only scroll the internal chat container, never scroll parent containers or window
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
   }, [chatHistory, selectedBuddy]);
 
   const handleSendMessage = () => {
@@ -297,7 +300,7 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
           </div>
 
           {/* Message Stream */}
-          <div className="flex-1 p-3 overflow-y-auto bg-[#ffffff] space-y-2 select-text">
+          <div ref={chatContainerRef} className="flex-1 p-3 overflow-y-auto bg-[#ffffff] space-y-2 select-text">
             {currentChat.map((msg) => (
               <div
                 key={msg.id}
@@ -320,7 +323,6 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
                 </div>
               </div>
             ))}
-            <div ref={chatEndRef} />
           </div>
 
           {/* Formatting Bar */}

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="w-full h-full overflow-hidden">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
@@ -10,8 +10,8 @@
     <!-- Authentic period-appropriate typography: Tahoma/Verdana fallback, plus handwritten fonts for sticky notes and retro monospaces -->
     <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Gloria+Hallelujah&family=VT323&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=Nanum+Pen+Script&display=swap" rel="stylesheet">
   </head>
-  <body class="bg-black text-[#111] overflow-hidden select-none m-0 p-0 w-screen h-screen" oncontextmenu="return false;">
-    <div id="root" class="w-full h-full"></div>
+  <body class="bg-black text-[#111] overflow-hidden select-none m-0 p-0 w-full h-full fixed inset-0" oncontextmenu="return false;">
+    <div id="root" class="w-full h-full overflow-hidden"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

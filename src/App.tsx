@@ -235,6 +235,24 @@ export default function App() {
     }
   }, [stickyNotes]);
 
+  // Guarantee browser window/document viewport is strictly pinned to 0,0
+  useEffect(() => {
+    const lockScroll = () => {
+      window.scrollTo(0, 0);
+      if (document.documentElement) document.documentElement.scrollTop = 0;
+      if (document.body) document.body.scrollTop = 0;
+      const surface = document.getElementById('desktop-surface');
+      if (surface) surface.scrollTop = 0;
+    };
+    lockScroll();
+    window.addEventListener('resize', lockScroll);
+    window.addEventListener('scroll', lockScroll, { passive: false });
+    return () => {
+      window.removeEventListener('resize', lockScroll);
+      window.removeEventListener('scroll', lockScroll);
+    };
+  }, [isBooted]);
+
   // Easter egg keyboard sequence buffer
   const [keyBuffer, setKeyBuffer] = useState('');
 
@@ -426,7 +444,7 @@ export default function App() {
         {/* 2. Classic 2004 Serene Landscape Desktop Wallpaper (Edge-to-Edge Fullscreen) */}
         <div
           id="desktop-surface"
-          className="absolute inset-0 w-full h-full pb-[30px]"
+          className="absolute inset-0 w-full h-full pb-[30px] overflow-hidden"
           onDoubleClick={(e) => {
             if ((e.target as HTMLElement).id === 'desktop-surface') {
               if (document.fullscreenElement) {
