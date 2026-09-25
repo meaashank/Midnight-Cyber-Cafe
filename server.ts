@@ -45,6 +45,7 @@ async function startServer() {
     history?: Array<{ from: string; text: string }>;
   }): Promise<{ reply: string; provider: string; model?: string }> {
     const openRouterKey =
+      process.env.OPENROUTER_API_KEY_CHAT ||
       process.env.OPENROUTER_AI_CHAT_FRIENDS ||
       process.env.OPENROUTER_API_KEY;
 
@@ -178,7 +179,9 @@ async function startServer() {
   // API 1: Health check
   app.get('/api/health', (req, res) => {
     const hasOpenRouter = !!(
-      process.env.OPENROUTER_AI_CHAT_FRIENDS || process.env.OPENROUTER_API_KEY
+      process.env.OPENROUTER_API_KEY_CHAT ||
+      process.env.OPENROUTER_AI_CHAT_FRIENDS ||
+      process.env.OPENROUTER_API_KEY
     );
     res.json({
       status: 'ok',

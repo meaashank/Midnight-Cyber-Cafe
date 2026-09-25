@@ -36,7 +36,9 @@ async function generateAiReply({
   history?: Array<{ from: string; text: string }>;
 }): Promise<{ reply: string; provider: string; model?: string }> {
   const openRouterKey =
-    process.env.OPENROUTER_AI_CHAT_FRIENDS || process.env.OPENROUTER_API_KEY;
+    process.env.OPENROUTER_API_KEY_CHAT ||
+    process.env.OPENROUTER_AI_CHAT_FRIENDS ||
+    process.env.OPENROUTER_API_KEY;
 
   // 1. Try OpenRouter
   if (openRouterKey) {
@@ -144,7 +146,11 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     time: new Date().toISOString(),
-    hasOpenRouterKey: !!(process.env.OPENROUTER_AI_CHAT_FRIENDS || process.env.OPENROUTER_API_KEY),
+    hasOpenRouterKey: !!(
+      process.env.OPENROUTER_API_KEY_CHAT ||
+      process.env.OPENROUTER_AI_CHAT_FRIENDS ||
+      process.env.OPENROUTER_API_KEY
+    ),
     hasGeminiKey: !!process.env.GEMINI_API_KEY,
   });
 });
