@@ -3,6 +3,7 @@ export type AppId =
   | 'internet_explorer'
   | 'aim'
   | 'winamp'
+  | 'vlc'
   | 'limewire'
   | 'minesweeper'
   | 'cs_trainer'
@@ -133,7 +134,7 @@ export interface PlaylistContextType {
 export interface FileItem {
   id: string;
   name: string;
-  type: 'folder' | 'txt' | 'doc' | 'mp3' | 'jpg' | 'exe' | 'zip' | 'html';
+  type: 'folder' | 'txt' | 'doc' | 'mp3' | 'mp4' | 'avi' | 'wmv' | 'jpg' | 'exe' | 'zip' | 'html';
   size?: string;
   modified?: string;
   content?: string;

@@ -2,6 +2,7 @@ import React, { useRef } from 'react';
 import { WindowInstance } from '../types';
 import { playMouseClick } from '../utils/audio';
 import { Minus, Square, X } from 'lucide-react';
+import { VlcConeIcon } from './apps/vlc/VlcConeIcon';
 
 interface WindowFrameProps {
   instance: WindowInstance;
@@ -117,7 +118,9 @@ export const WindowFrame: React.FC<WindowFrameProps> = ({
       >
         {/* Left side: Icon + Title */}
         <div className="flex items-center gap-1.5 truncate pr-2">
-          <span className="text-[14px] leading-none select-none">{instance.icon}</span>
+          <span className="text-[14px] leading-none select-none flex items-center shrink-0">
+            {instance.appId === 'vlc' ? <VlcConeIcon size={15} /> : instance.icon}
+          </span>
           <span className="truncate font-tahoma text-[11.5px]">{instance.title}</span>
         </div>
 

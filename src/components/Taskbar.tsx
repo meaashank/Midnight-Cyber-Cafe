@@ -13,6 +13,7 @@ import {
   HelpCircle,
   PlaySquare,
 } from 'lucide-react';
+import { VlcConeIcon } from './apps/vlc/VlcConeIcon';
 
 interface TaskbarProps {
   windows: WindowInstance[];
@@ -198,7 +199,9 @@ export const Taskbar: React.FC<TaskbarProps> = ({
                         : 'bg-[#3c81f3] hover:bg-[#5293fb] text-white/90 border-[#1941a5]'
                     }`}
                   >
-                    <span className="text-[12px]">{win.icon}</span>
+                    <span className="text-[12px] flex items-center shrink-0">
+                      {win.appId === 'vlc' ? <VlcConeIcon size={14} /> : win.icon}
+                    </span>
                     <span className="truncate">{win.title}</span>
                   </button>
                 );
@@ -382,6 +385,17 @@ export const Taskbar: React.FC<TaskbarProps> = ({
                 >
                   <span className="text-lg">⚡</span>
                   <span>Winamp Player</span>
+                </div>
+
+                <div
+                  onClick={() => {
+                    setIsStartOpen(false);
+                    onOpenApp('vlc');
+                  }}
+                  className="flex items-center gap-2 p-1 hover:bg-[#316ac5] hover:text-white rounded-xs cursor-pointer"
+                >
+                  <VlcConeIcon size={18} />
+                  <span>VLC Media Player</span>
                 </div>
 
                 <div

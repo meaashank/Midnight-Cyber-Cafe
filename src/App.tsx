@@ -19,6 +19,8 @@ import { CounterStrikeTrainer } from './components/apps/CounterStrikeTrainer';
 import { NotepadApp } from './components/apps/NotepadApp';
 import { PaintApp } from './components/apps/PaintApp';
 import { StickyNoteApp } from './components/apps/StickyNoteApp';
+import { VlcApp } from './components/apps/vlc/VlcApp';
+import { VlcConeIcon } from './components/apps/vlc/VlcConeIcon';
 import { PlaylistProvider } from './components/PlaylistProvider';
 import { MusicPlayerDock } from './components/MusicPlayerDock';
 import { PlaylistManagerModal } from './components/PlaylistManagerModal';
@@ -56,6 +58,18 @@ const INITIAL_WINDOWS: WindowInstance[] = [
     zIndex: 9,
     position: { x: 640, y: 40 },
     size: { width: 440, height: 400 },
+  },
+  {
+    id: 'vlc_main',
+    appId: 'vlc',
+    title: 'VLC media player',
+    icon: '🗼',
+    isOpen: false,
+    isMinimized: false,
+    isMaximized: false,
+    zIndex: 8,
+    position: { x: 200, y: 55 },
+    size: { width: 680, height: 470 },
   },
   {
     id: 'ie_main',
@@ -354,6 +368,14 @@ export default function App() {
     );
   };
 
+  const updateWindowTitle = React.useCallback((id: string, newTitle: string) => {
+    setWindows((prev) => {
+      const target = prev.find((w) => w.id === id);
+      if (!target || target.title === newTitle) return prev;
+      return prev.map((w) => (w.id === id ? { ...w, title: newTitle } : w));
+    });
+  }, []);
+
   const openApp = (appId: AppId, extraData?: Record<string, any>) => {
     playHddSeek();
     playMouseClick();
@@ -535,6 +557,15 @@ export default function App() {
             />
 
             <DesktopIcon
+              id="vlc"
+              title="VLC media player"
+              icon={<VlcConeIcon size={34} />}
+              isSelected={selectedIconId === 'vlc'}
+              onClick={() => setSelectedIconId('vlc')}
+              onDoubleClick={() => openApp('vlc')}
+            />
+
+            <DesktopIcon
               id="cs"
               title="Counter-Strike 1.6"
               icon="🎯"
@@ -585,7 +616,18 @@ export default function App() {
             >
               {win.appId === 'aim' && <AimApp onTriggerBuzz={triggerBuzz} />}
               {win.appId === 'winamp' && <WinampApp />}
-              {win.appId === 'internet_explorer' && <InternetExplorerApp />}
+              {win.appId === 'vlc' && (
+                <VlcApp
+                  onClose={() => closeWindow(win.id)}
+                  initialMediaUrl={win.extraData?.initialMediaUrl}
+                  initialMediaTitle={win.extraData?.initialMediaTitle}
+                />
+              )}
+              {win.appId === 'internet_explorer' && (
+                <InternetExplorerApp
+                  onTitleChange={(newTitle) => updateWindowTitle(win.id, newTitle)}
+                />
+              )}
               {win.appId === 'limewire' && <LimeWireApp />}
               {win.appId === 'my_computer' && (
                 <MyComputerApp
@@ -596,8 +638,11 @@ export default function App() {
                       openApp('notepad', { initialContent: file.content });
                     } else if (file.type === 'mp3') {
                       openApp('winamp');
+                    } else if (file.type === 'mp4' || file.type === 'avi' || file.type === 'wmv') {
+                      openApp('vlc', { initialMediaUrl: file.content, initialMediaTitle: file.name });
                     } else if (file.type === 'exe') {
-                      if (file.id.includes('cs')) openApp('cs_trainer');
+                      if (file.id.includes('vlc')) openApp('vlc');
+                      else if (file.id.includes('cs')) openApp('cs_trainer');
                       else openApp('minesweeper');
                     } else if (file.type === 'html') {
                       openApp('internet_explorer');

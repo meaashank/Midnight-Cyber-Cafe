@@ -258,13 +258,16 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, []);
 
+  const currentTrackIndexRef = useRef<number>(0);
+
   // Update current track info from YouTube player video data
   const syncCurrentTrackFromPlayer = useCallback(() => {
     if (!playerRef.current) return;
     try {
-      const idx = playerRef.current.getPlaylistIndex?.() ?? currentTrackIndex;
+      const idx = playerRef.current.getPlaylistIndex?.() ?? currentTrackIndexRef.current;
       if (typeof idx === 'number' && idx >= 0) {
-        setCurrentTrackIndex(idx);
+        currentTrackIndexRef.current = idx;
+        setCurrentTrackIndex((prev) => (prev === idx ? prev : idx));
       }
 
       const videoData = playerRef.current.getVideoData?.();
@@ -313,7 +316,7 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } catch {
       //
     }
-  }, [currentTrackIndex]);
+  }, []);
 
   // Load a specified playlist into the player
   const loadPlaylist = useCallback(

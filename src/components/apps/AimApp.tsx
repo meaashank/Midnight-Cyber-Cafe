@@ -4,69 +4,66 @@ import {
   playAimReceive,
   playAimSend,
   playAimBuzz,
-  playAimDoor,
   playKeyClick,
   playMouseClick,
 } from '../../utils/audio';
-import { Send, BellRing, UserCheck, MessageSquare, AlertCircle } from 'lucide-react';
+import { BellRing, Sparkles } from 'lucide-react';
+import { AIM_PERSONAS } from '../../config/aimPersonas';
 
 interface AimAppProps {
   onTriggerBuzz: () => void;
 }
 
 const INITIAL_BUDDIES: AimBuddy[] = [
-  { screenName: 'sk8rboi2004', status: 'online', statusMessage: 'landing kickflips at the park later' },
-  { screenName: 'xX_bhavya_core_Xx', status: 'online', statusMessage: 'listening to Evanescence 🎵' },
-  { screenName: 'HaloMaster', status: 'away', statusMessage: 'playing Halo 2 on Xbox Live brb' },
-  { screenName: 'punkrockgirl', status: 'online', statusMessage: 'homework is so annoying' },
-  { screenName: 'Mike', status: 'away', statusMessage: 'eating dinner / afk' },
-  { screenName: 'CyberCafeAdmin', status: 'online', statusMessage: 'Cabin 04 session active' },
+  {
+    screenName: 'xX_bhavya_core_Xx',
+    status: 'online',
+    statusMessage: AIM_PERSONAS.xX_bhavya_core_Xx.statusMessage,
+  },
+  {
+    screenName: 'CyberCafeAdmin',
+    status: 'online',
+    statusMessage: AIM_PERSONAS.CyberCafeAdmin.statusMessage,
+  },
+  {
+    screenName: 'sk8rboi2004',
+    status: 'online',
+    statusMessage: AIM_PERSONAS.sk8rboi2004.statusMessage,
+  },
+  {
+    screenName: 'punkrockgirl',
+    status: 'online',
+    statusMessage: AIM_PERSONAS.punkrockgirl.statusMessage,
+  },
+  {
+    screenName: 'HaloMaster',
+    status: 'away',
+    statusMessage: AIM_PERSONAS.HaloMaster.statusMessage,
+  },
+  {
+    screenName: 'Mike',
+    status: 'away',
+    statusMessage: AIM_PERSONAS.Mike.statusMessage,
+  },
 ];
-
-const BOT_RESPONSES: Record<string, string[]> = {
-  sk8rboi2004: [
-    'yo what up! are you at the LAN cafe right now?',
-    'tell the clerk if they got any Bawls guarana drinks left',
-    'im coming over around 11 for some Counter-Strike 1.6',
-    'did you see that crazy Tony Hawk trick on MTV?',
-    'gtg mom needs the phone line lol'
-  ],
-  xX_bhavya_core_Xx: [
-    'heyyy! did you do the chemistry worksheet?',
-    'omg winamp is playing my favorite song right now',
-    'check out my new MySpace background layout I coded it with HTML tables haha',
-    'brb making a mixtape for Friday'
-  ],
-  HaloMaster: [
-    '(Auto-Response): playing Halo 2 on Xbox Live brb',
-    'yo 2v2 on Lockout later? grab a controller',
-    'BXR combo is so overpowered'
-  ],
-  punkrockgirl: [
-    'Green Day American Idiot album is so good',
-    'did LimeWire finish downloading that song?',
-    'make sure you don\'t download a virus lol'
-  ],
-  CyberCafeAdmin: [
-    'System Alert: Cabin 04 session is active. Rate is $2.00/hour.',
-    'Please do not disconnect the blue Ethernet cable.',
-    'Printing is $0.10 per black and white page at the front counter.'
-  ]
-};
 
 export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
   const [buddies] = useState<AimBuddy[]>(INITIAL_BUDDIES);
   const [selectedBuddy, setSelectedBuddy] = useState<string>('xX_bhavya_core_Xx');
-  const [myStatusMessage, setMyStatusMessage] = useState<string>('listening to music @ cyber cafe');
+  const [myStatusMessage] = useState<string>('listening to music @ cabin 04');
   const [myStatus, setMyStatus] = useState<'online' | 'away'>('online');
   const [inputText, setInputText] = useState('');
   const [isBuzzing, setIsBuzzing] = useState(false);
+  const [isBuddyTyping, setIsBuddyTyping] = useState(false);
 
   const [chatHistory, setChatHistory] = useState<Record<string, AimMessage[]>>({
     xX_bhavya_core_Xx: [
       { id: '1', from: 'xX_bhavya_core_Xx', text: 'hey are you still at Cabin 04?', time: '10:42 PM' },
-      { id: '2', from: 'me', text: 'yeah, downloaded some songs on Winamp', time: '10:43 PM' },
-      { id: '3', from: 'xX_bhavya_core_Xx', text: 'send me that Linkin park track if it finishes!', time: '10:44 PM' },
+      { id: '2', from: 'me', text: 'yeah, listening to some songs on Winamp', time: '10:43 PM' },
+      { id: '3', from: 'xX_bhavya_core_Xx', text: 'send me that Linkin park track if it finishes! ;)', time: '10:44 PM' },
+    ],
+    CyberCafeAdmin: [
+      { id: '1', from: 'CyberCafeAdmin', text: 'Welcome to Cabin 04. Your terminal is active. Please let front desk know if you require laser printing or drinks.', time: '10:15 PM' },
     ],
     sk8rboi2004: [
       { id: '1', from: 'sk8rboi2004', text: 'yo log into Counter-Strike server 192.168.1.104', time: '10:30 PM' },
@@ -80,16 +77,19 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
     if (chatContainerRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
-  }, [chatHistory, selectedBuddy]);
+  }, [chatHistory, selectedBuddy, isBuddyTyping]);
 
-  const handleSendMessage = () => {
-    if (!inputText.trim()) return;
+  const handleSendMessage = async () => {
+    const textSent = inputText.trim();
+    if (!textSent) return;
+
     playAimSend();
+    setInputText('');
 
     const newMsg: AimMessage = {
       id: Date.now().toString(),
       from: 'me',
-      text: inputText.trim(),
+      text: textSent,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
@@ -98,30 +98,76 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
       [selectedBuddy]: [...(prev[selectedBuddy] || []), newMsg],
     }));
 
-    const textSent = inputText;
-    setInputText('');
+    // Realistic typing indicator delay (1.2s to 2.4s)
+    setIsBuddyTyping(true);
 
-    // Simulate authentic response after 1.5 - 3.5 seconds
-    setTimeout(() => {
-      const responses = BOT_RESPONSES[selectedBuddy] || ['lol cool', 'brb', 'nice'];
-      const replyText = responses[Math.floor(Math.random() * responses.length)];
-      
-      playAimReceive();
-      const replyMsg: AimMessage = {
-        id: (Date.now() + 1).toString(),
-        from: selectedBuddy,
-        text: replyText,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
+    try {
+      const historyContext = (chatHistory[selectedBuddy] || []).slice(-6);
 
-      setChatHistory((prev) => ({
-        ...prev,
-        [selectedBuddy]: [...(prev[selectedBuddy] || []), replyMsg],
-      }));
-    }, 1800 + Math.random() * 1500);
+      const res = await fetch('/api/aim/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          buddy: selectedBuddy,
+          message: textSent,
+          history: historyContext,
+        }),
+      });
+
+      let replyText = '';
+      if (res.ok) {
+        const data = await res.json();
+        replyText = data.reply;
+      }
+
+      // If backend returned empty or network failed, fallback gracefully
+      if (!replyText) {
+        const persona = AIM_PERSONAS[selectedBuddy];
+        const fallbacks = persona?.sampleResponses || ['lol nice', 'brb', 'k'];
+        replyText = fallbacks[Math.floor(Math.random() * fallbacks.length)];
+      }
+
+      // Simulate human response pause
+      setTimeout(() => {
+        setIsBuddyTyping(false);
+        playAimReceive();
+
+        const replyMsg: AimMessage = {
+          id: (Date.now() + 1).toString(),
+          from: selectedBuddy,
+          text: replyText,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+
+        setChatHistory((prev) => ({
+          ...prev,
+          [selectedBuddy]: [...(prev[selectedBuddy] || []), replyMsg],
+        }));
+      }, 1200 + Math.random() * 800);
+    } catch {
+      setTimeout(() => {
+        setIsBuddyTyping(false);
+        const persona = AIM_PERSONAS[selectedBuddy];
+        const fallbacks = persona?.sampleResponses || ['lol nice', 'brb', 'k'];
+        const fallbackReply = fallbacks[Math.floor(Math.random() * fallbacks.length)];
+
+        playAimReceive();
+        const replyMsg: AimMessage = {
+          id: (Date.now() + 1).toString(),
+          from: selectedBuddy,
+          text: fallbackReply,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+
+        setChatHistory((prev) => ({
+          ...prev,
+          [selectedBuddy]: [...(prev[selectedBuddy] || []), replyMsg],
+        }));
+      }, 1200);
+    }
   };
 
-  const handleSendBuzz = () => {
+  const handleSendBuzz = async () => {
     playAimBuzz();
     onTriggerBuzz();
     setIsBuzzing(true);
@@ -140,36 +186,83 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
       [selectedBuddy]: [...(prev[selectedBuddy] || []), buzzMsg],
     }));
 
-    // Bot reacts to buzz
-    setTimeout(() => {
-      playAimReceive();
-      const reaction: AimMessage = {
-        id: (Date.now() + 1).toString(),
-        from: selectedBuddy,
-        text: 'whoa why did you buzz me my screen shook haha!',
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-      setChatHistory((prev) => ({
-        ...prev,
-        [selectedBuddy]: [...(prev[selectedBuddy] || []), reaction],
-      }));
-    }, 2000);
+    setIsBuddyTyping(true);
+
+    try {
+      const res = await fetch('/api/aim/buzz', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ buddy: selectedBuddy }),
+      });
+
+      let reactionText = '';
+      if (res.ok) {
+        const data = await res.json();
+        reactionText = data.reply;
+      }
+
+      if (!reactionText) {
+        const persona = AIM_PERSONAS[selectedBuddy];
+        const buzzFallbacks = persona?.buzzResponses || ['whoa why did you buzz me haha!'];
+        reactionText = buzzFallbacks[Math.floor(Math.random() * buzzFallbacks.length)];
+      }
+
+      setTimeout(() => {
+        setIsBuddyTyping(false);
+        playAimReceive();
+        const reaction: AimMessage = {
+          id: (Date.now() + 1).toString(),
+          from: selectedBuddy,
+          text: reactionText,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+        setChatHistory((prev) => ({
+          ...prev,
+          [selectedBuddy]: [...(prev[selectedBuddy] || []), reaction],
+        }));
+      }, 1400);
+    } catch {
+      setTimeout(() => {
+        setIsBuddyTyping(false);
+        playAimReceive();
+        const persona = AIM_PERSONAS[selectedBuddy];
+        const reactionText = persona?.buzzResponses?.[0] || 'whoa why did you buzz me haha!';
+        const reaction: AimMessage = {
+          id: (Date.now() + 1).toString(),
+          from: selectedBuddy,
+          text: reactionText,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+        setChatHistory((prev) => ({
+          ...prev,
+          [selectedBuddy]: [...(prev[selectedBuddy] || []), reaction],
+        }));
+      }, 1400);
+    }
   };
 
   const currentChat = chatHistory[selectedBuddy] || [];
+  const activePersona = AIM_PERSONAS[selectedBuddy];
 
   return (
-    <div className={`w-full h-full flex flex-col bg-[#ece9d8] text-[#111] font-tahoma text-[11px] select-text ${
-      isBuzzing ? 'animate-aim-buzz' : ''
-    }`}>
+    <div
+      className={`w-full h-full flex flex-col bg-[#ece9d8] text-[#111] font-tahoma text-[11px] select-text ${
+        isBuzzing ? 'animate-aim-buzz' : ''
+      }`}
+    >
       {/* AIM Classic Yellow Running Man Banner */}
-      <div className="bg-[#ffcc00] border-b border-[#cca000] px-3 py-1.5 flex items-center justify-between shadow-sm">
+      <div className="bg-[#ffcc00] border-b border-[#cca000] px-3 py-1.5 flex items-center justify-between shadow-sm select-none">
         <div className="flex items-center gap-2">
           <div className="w-5 h-5 bg-[#002266] rounded-full flex items-center justify-center text-white font-bold text-[11px]">
             🏃
           </div>
           <div>
-            <div className="font-bold text-[#002266] text-[12px] leading-tight">AOL Instant Messenger</div>
+            <div className="font-bold text-[#002266] text-[12px] leading-tight flex items-center gap-1.5">
+              <span>AOL Instant Messenger</span>
+              <span className="text-[9px] bg-[#002266] text-yellow-300 font-mono px-1 py-0.2 rounded-xs font-bold">
+                2004
+              </span>
+            </div>
             <div className="text-[10px] text-[#444] font-mono">Screen Name: Guest_Cabin04</div>
           </div>
         </div>
@@ -180,7 +273,7 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
               playMouseClick();
               setMyStatus(e.target.value as 'online' | 'away');
             }}
-            className="text-[10px] bg-white border border-[#7f9db9] px-1 py-0.5 rounded cursor-pointer"
+            className="text-[10px] bg-white border border-[#7f9db9] px-1 py-0.5 rounded cursor-pointer font-medium"
           >
             <option value="online">🟢 Online</option>
             <option value="away">🟡 Away</option>
@@ -191,9 +284,9 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
       {/* Main split: Buddy List (Left) and Active Chat (Right) */}
       <div className="flex-1 flex overflow-hidden">
         {/* Buddy List Drawer */}
-        <div className="w-[170px] bg-white border-r border-[#7f9db9] flex flex-col shrink-0">
+        <div className="w-[180px] bg-white border-r border-[#7f9db9] flex flex-col shrink-0 select-none">
           <div className="bg-[#f0ede0] px-2 py-1 border-b border-[#d4d0c8] font-bold text-[10.5px] text-[#003399] flex items-center justify-between">
-            <span>Buddies ({buddies.filter(b => b.status === 'online').length} Online)</span>
+            <span>Buddies ({buddies.filter((b) => b.status === 'online').length} Online)</span>
           </div>
 
           <div className="flex-1 overflow-y-auto p-1 divide-y divide-gray-100">
@@ -209,15 +302,30 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
                       playMouseClick();
                       setSelectedBuddy(buddy.screenName);
                     }}
-                    className={`flex items-center justify-between px-1.5 py-1 rounded cursor-pointer transition-colors ${
+                    className={`flex flex-col px-1.5 py-1 rounded cursor-pointer transition-colors ${
                       selectedBuddy === buddy.screenName
                         ? 'bg-[#316ac5] text-white font-bold'
                         : 'hover:bg-[#eef2f8] text-[#111]'
                     }`}
                   >
-                    <div className="truncate flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
-                      <span className="truncate">{buddy.screenName}</span>
+                    <div className="truncate flex items-center justify-between gap-1">
+                      <div className="flex items-center gap-1 truncate">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                        <span className="truncate">{buddy.screenName}</span>
+                      </div>
+                      {buddy.screenName === 'xX_bhavya_core_Xx' && (
+                        <span className="text-[9px] text-pink-300">💖</span>
+                      )}
+                      {buddy.screenName === 'CyberCafeAdmin' && (
+                        <span className="text-[9px] opacity-75">🏢</span>
+                      )}
+                    </div>
+                    <div
+                      className={`text-[8.5px] truncate pl-2.5 ${
+                        selectedBuddy === buddy.screenName ? 'text-blue-100' : 'text-gray-400'
+                      }`}
+                    >
+                      {buddy.statusMessage}
                     </div>
                   </div>
                 ))}
@@ -235,7 +343,7 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
                       playMouseClick();
                       setSelectedBuddy(buddy.screenName);
                     }}
-                    className={`flex items-center justify-between px-1.5 py-1 rounded cursor-pointer opacity-70 ${
+                    className={`flex flex-col px-1.5 py-1 rounded cursor-pointer opacity-75 ${
                       selectedBuddy === buddy.screenName
                         ? 'bg-[#316ac5] text-white font-bold opacity-100'
                         : 'hover:bg-[#eef2f8] text-[#333]'
@@ -244,6 +352,13 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
                     <div className="truncate flex items-center gap-1">
                       <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
                       <span className="truncate">{buddy.screenName}</span>
+                    </div>
+                    <div
+                      className={`text-[8.5px] truncate pl-2.5 ${
+                        selectedBuddy === buddy.screenName ? 'text-blue-100' : 'text-gray-400'
+                      }`}
+                    >
+                      {buddy.statusMessage}
                     </div>
                   </div>
                 ))}
@@ -259,11 +374,18 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
         {/* Active Chat Window */}
         <div className="flex-1 flex flex-col bg-white">
           {/* Chat Header */}
-          <div className="bg-[#f0ede0] px-3 py-1.5 border-b border-[#7f9db9] flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <span className="font-bold text-[#002266] text-[12px]">{selectedBuddy}</span>
-              <span className="text-[10px] text-gray-500">
-                — {buddies.find((b) => b.screenName === selectedBuddy)?.statusMessage || 'Instant Message'}
+          <div className="bg-[#f0ede0] px-3 py-1.5 border-b border-[#7f9db9] flex items-center justify-between select-none">
+            <div className="flex flex-col max-w-[70%] truncate">
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-[#002266] text-[12px]">{selectedBuddy}</span>
+                {activePersona && (
+                  <span className="text-[9.5px] bg-[#dfdcc8] text-[#333] px-1.5 py-0.2 rounded-xs border border-gray-400 truncate">
+                    {activePersona.displayName} ({activePersona.role.split('(')[0].trim()})
+                  </span>
+                )}
+              </div>
+              <span className="text-[9.5px] text-gray-500 truncate">
+                {activePersona?.statusMessage || 'Instant Message'}
               </span>
             </div>
 
@@ -280,7 +402,7 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
                 <span>BUZZ</span>
               </button>
 
-              {/* Close / Clear Chat Button */}
+              {/* Clear Chat Button */}
               <button
                 type="button"
                 onClick={() => {
@@ -299,8 +421,18 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
             </div>
           </div>
 
+          {/* Persona Role Banner / Subtle hint */}
+          <div className="bg-[#fbfbf8] border-b border-[#ebe8dc] px-3 py-1 text-[9.5px] text-gray-500 flex items-center justify-between select-none">
+            <span className="truncate italic">
+              Tone: {activePersona?.toneDescription || 'Standard AIM Friend'}
+            </span>
+          </div>
+
           {/* Message Stream */}
-          <div ref={chatContainerRef} className="flex-1 p-3 overflow-y-auto bg-[#ffffff] space-y-2 select-text">
+          <div
+            ref={chatContainerRef}
+            className="flex-1 p-3 overflow-y-auto bg-[#ffffff] space-y-2 select-text"
+          >
             {currentChat.map((msg) => (
               <div
                 key={msg.id}
@@ -318,30 +450,42 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
                     <span className="text-[9px] text-gray-400 font-normal ml-1.5">{msg.time}</span>
                   </div>
                 )}
-                <div className={`mt-0.5 font-tahoma ${msg.isBuzz ? 'text-center' : 'text-[#111]'}`}>
+                <div
+                  className={`mt-0.5 font-tahoma whitespace-pre-wrap ${
+                    msg.isBuzz ? 'text-center' : 'text-[#111]'
+                  }`}
+                >
                   {msg.text}
                 </div>
               </div>
             ))}
+
+            {/* Buddy Typing Indicator */}
+            {isBuddyTyping && (
+              <div className="text-[10px] text-gray-500 italic flex items-center gap-1.5 pt-1 animate-pulse">
+                <span>💬</span>
+                <span>{selectedBuddy} is typing a message...</span>
+              </div>
+            )}
           </div>
 
           {/* Formatting Bar */}
-          <div className="h-6 bg-[#ece9d8] border-t border-b border-[#d4d0c8] px-2 flex items-center gap-3 text-[10px] text-gray-700">
+          <div className="h-6 bg-[#ece9d8] border-t border-b border-[#d4d0c8] px-2 flex items-center gap-3 text-[10px] text-gray-700 select-none">
             <span className="font-bold cursor-pointer hover:underline">B</span>
             <span className="italic cursor-pointer hover:underline">I</span>
             <span className="underline cursor-pointer">U</span>
             <span className="border-l border-gray-300 h-3" />
             <span className="text-blue-600 cursor-pointer">A</span>
             <span className="text-red-600 cursor-pointer">Link</span>
-            <span className="text-gray-500 text-[9px] ml-auto">Direct Connection</span>
+            <span className="text-gray-500 text-[9px] ml-auto">Direct Connection (Cabin 04)</span>
           </div>
 
           {/* Text Input Area & Send Button */}
-          <div className="p-2 bg-[#ece9d8] flex items-end gap-2">
+          <div className="p-2 bg-[#ece9d8] flex items-end gap-2 select-none">
             <textarea
               value={inputText}
               rows={2}
-              placeholder="Type message and press Enter..."
+              placeholder={`Send message to ${selectedBuddy}... (Press Enter)`}
               onChange={(e) => {
                 playKeyClick();
                 setInputText(e.target.value);
@@ -352,12 +496,12 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
                   handleSendMessage();
                 }
               }}
-              className="flex-1 bg-white border border-[#7f9db9] p-1.5 text-[11.5px] rounded-xs resize-none outline-none focus:border-[#316ac5]"
+              className="flex-1 bg-white border border-[#7f9db9] p-1.5 text-[11.5px] rounded-xs resize-none outline-none focus:border-[#316ac5] select-text font-tahoma"
             />
             <button
               type="button"
               onClick={handleSendMessage}
-              className="px-3 py-2.5 bg-[#ece9d8] hover:bg-[#dfdbcc] active:bg-[#ccc7b6] border-t border-l border-white border-r border-b border-[#808080] font-bold text-[11px] cursor-pointer shadow-xs"
+              className="px-3 py-2.5 bg-[#ece9d8] hover:bg-[#dfdbcc] active:bg-[#ccc7b6] border-t border-l border-white border-r border-b border-[#808080] font-bold text-[11px] cursor-pointer shadow-xs select-none"
             >
               Send
             </button>

@@ -4,7 +4,7 @@ import { playMouseClick } from '../utils/audio';
 interface DesktopIconProps {
   id: string;
   title: string;
-  icon: string;
+  icon: React.ReactNode;
   isSelected: boolean;
   onClick: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;

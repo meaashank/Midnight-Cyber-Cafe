@@ -1,16 +1,258 @@
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
+import { GoogleGenAI } from '@google/genai';
+import { AIM_PERSONAS } from './src/config/aimPersonas';
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(express.json());
+  app.use(express.static(path.join(process.cwd(), 'public')));
+
+  // Server-side Gemini AI Client fallback
+  const getAiClient = () => {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return null;
+    return new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
+  };
+
+  // OpenRouter Open-Source Models Priority List (DeepSeek, Llama 3.3 70B, Mistral, Gemma)
+  const OPENROUTER_MODELS = [
+    'deepseek/deepseek-chat',
+    'meta-llama/llama-3.3-70b-instruct',
+    'mistralai/mistral-small-24b-instruct-2501',
+    'google/gemma-2-9b-it',
+    'qwen/qwen-2.5-72b-instruct',
+  ];
+
+  // Universal AI generator helper with multi-tier OpenRouter + Gemini + Retro fallbacks
+  async function generateAiReply({
+    persona,
+    prompt,
+    history = [],
+  }: {
+    persona: any;
+    prompt: string;
+    history?: Array<{ from: string; text: string }>;
+  }): Promise<{ reply: string; provider: string; model?: string }> {
+    const openRouterKey =
+      process.env.OPENROUTER_AI_CHAT_FRIENDS ||
+      process.env.OPENROUTER_API_KEY;
+
+    // 1. Try OpenRouter with smart open-source models
+    if (openRouterKey) {
+      const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+        {
+          role: 'system',
+          content: `${persona.systemInstruction}\n\nIMPORTANT FORMATTING RULE: Keep replies concise (1 to 3 short sentences max) in true authentic 2004 AIM style. Use authentic 2004 internet slang, emoticons, and tone. Never talk like an AI assistant.`,
+        },
+      ];
+
+      if (Array.isArray(history)) {
+        for (const item of history.slice(-6)) {
+          if (item.text && item.from) {
+            messages.push({
+              role: item.from === 'me' ? 'user' : 'assistant',
+              content: item.text,
+            });
+          }
+        }
+      }
+
+      messages.push({
+        role: 'user',
+        content: prompt || 'hey',
+      });
+
+      for (const model of OPENROUTER_MODELS) {
+        try {
+          const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${openRouterKey}`,
+              'HTTP-Referer': 'https://cybercafe2004.local',
+              'X-Title': 'Midnight Cyber Cafe 2004 AIM',
+            },
+            body: JSON.stringify({
+              model,
+              messages,
+              max_tokens: 120,
+              temperature: 0.95,
+            }),
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            const replyText = data.choices?.[0]?.message?.content?.trim();
+            if (replyText) {
+              return {
+                reply: replyText,
+                provider: 'openrouter',
+                model,
+              };
+            }
+          } else {
+            console.warn(`[OpenRouter ${model}] HTTP ${res.status}`);
+          }
+        } catch (openRouterErr: any) {
+          console.warn(`[OpenRouter ${model}] fetch failed:`, openRouterErr.message);
+        }
+      }
+    }
+
+    // 2. Fallback to Gemini if configured
+    const ai = getAiClient();
+    if (ai && process.env.GEMINI_API_KEY) {
+      try {
+        const contents: Array<{ role: 'user' | 'model'; parts: [{ text: string }] }> = [];
+        if (Array.isArray(history)) {
+          for (const item of history.slice(-6)) {
+            if (item.text && item.from) {
+              contents.push({
+                role: item.from === 'me' ? 'user' : 'model',
+                parts: [{ text: item.text }],
+              });
+            }
+          }
+        }
+        contents.push({
+          role: 'user',
+          parts: [{ text: prompt || 'hey' }],
+        });
+
+        let aiResponse;
+        try {
+          aiResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents,
+            config: {
+              systemInstruction: persona.systemInstruction,
+              temperature: 0.95,
+              topP: 0.95,
+            },
+          });
+        } catch {
+          aiResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-lite',
+            contents,
+            config: {
+              systemInstruction: persona.systemInstruction,
+              temperature: 0.95,
+              topP: 0.95,
+            },
+          });
+        }
+
+        const replyText = aiResponse.text?.trim();
+        if (replyText) {
+          return {
+            reply: replyText,
+            provider: 'gemini',
+            model: 'gemini-flash',
+          };
+        }
+      } catch (geminiErr: any) {
+        console.warn(`[Gemini Fallback] error:`, geminiErr.message);
+      }
+    }
+
+    // 3. Fallback to authentic 2004 persona responses
+    const fallbacks = persona.sampleResponses || ['lol nice', 'brb', 'k'];
+    const randomFallback = fallbacks[Math.floor(Math.random() * fallbacks.length)];
+    return {
+      reply: randomFallback,
+      provider: 'retro_fallback',
+    };
+  }
 
   // API 1: Health check
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', time: new Date().toISOString() });
+    const hasOpenRouter = !!(
+      process.env.OPENROUTER_AI_CHAT_FRIENDS || process.env.OPENROUTER_API_KEY
+    );
+    res.json({
+      status: 'ok',
+      time: new Date().toISOString(),
+      hasOpenRouterKey: hasOpenRouter,
+      openRouterModels: OPENROUTER_MODELS,
+      hasGeminiKey: !!process.env.GEMINI_API_KEY,
+    });
+  });
+
+  // API 1.5: AIM Persona Chat Endpoint powered by OpenRouter / Gemini AI
+  app.post('/api/aim/chat', async (req, res) => {
+    try {
+      const { buddy, message, history } = req.body;
+      const persona = AIM_PERSONAS[buddy];
+
+      if (!persona) {
+        return res.status(400).json({ error: 'Unknown AIM buddy' });
+      }
+
+      const result = await generateAiReply({
+        persona,
+        prompt: message || 'hey',
+        history,
+      });
+
+      return res.json({
+        reply: result.reply,
+        buddy: persona.screenName,
+        aiPowered: result.provider !== 'retro_fallback',
+        provider: result.provider,
+        model: result.model,
+      });
+    } catch (err: any) {
+      console.error('AIM chat error:', err);
+      res.status(500).json({ error: 'Failed to process AIM message' });
+    }
+  });
+
+  // API 1.6: AIM BUZZ reaction endpoint
+  app.post('/api/aim/buzz', async (req, res) => {
+    try {
+      const { buddy } = req.body;
+      const persona = AIM_PERSONAS[buddy];
+
+      if (!persona) {
+        return res.status(400).json({ error: 'Unknown AIM buddy' });
+      }
+
+      const result = await generateAiReply({
+        persona,
+        prompt:
+          '⚠️ [SYSTEM NOTIFICATION]: The user just pressed the BUZZ button on your AIM window, shaking your screen with a loud vibration sound!',
+        history: [],
+      });
+
+      // If retro fallback, pick from buzz specific responses
+      let replyText = result.reply;
+      if (result.provider === 'retro_fallback') {
+        const buzzFallbacks = persona.buzzResponses || ['whoa why did you buzz me haha!'];
+        replyText = buzzFallbacks[Math.floor(Math.random() * buzzFallbacks.length)];
+      }
+
+      return res.json({
+        reply: replyText,
+        buddy: persona.screenName,
+        aiPowered: result.provider !== 'retro_fallback',
+        provider: result.provider,
+        model: result.model,
+      });
+    } catch (err: any) {
+      console.error('AIM buzz error:', err);
+      res.status(500).json({ error: 'Failed to process buzz' });
+    }
   });
 
   // API 2: Real live web search endpoint for IE6 Google / Search Bar
@@ -440,6 +682,68 @@ async function startServer() {
           </body>
         </html>
       `);
+    }
+  });
+
+  // API 6: Universal Media Stream Proxy for VLC media player
+  app.get('/api/stream', async (req, res) => {
+    try {
+      const targetUrl = req.query.url as string;
+      if (!targetUrl) {
+        return res.status(400).send('Missing url query parameter');
+      }
+
+      // Forward headers like Range for video seeking
+      const headers: Record<string, string> = {
+        'User-Agent': 'VLC/0.8.6c (MidnightCyberCafe; Linux)',
+        Accept: '*/*',
+      };
+      if (req.headers.range) {
+        headers['Range'] = req.headers.range;
+      }
+
+      const response = await fetch(targetUrl, {
+        headers,
+        redirect: 'follow',
+      });
+
+      if (!response.ok && response.status !== 206) {
+        return res.status(response.status).send(`Upstream returned ${response.status}`);
+      }
+
+      // Relay essential streaming headers
+      const contentType = response.headers.get('content-type') || 'video/mp4';
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Accept-Ranges', 'bytes');
+
+      const contentLength = response.headers.get('content-length');
+      if (contentLength) res.setHeader('Content-Length', contentLength);
+
+      const contentRange = response.headers.get('content-range');
+      if (contentRange) res.setHeader('Content-Range', contentRange);
+
+      res.status(response.status);
+
+      if (response.body) {
+        const reader = response.body.getReader();
+        const pump = async () => {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            res.write(Buffer.from(value));
+          }
+          res.end();
+        };
+        pump().catch(() => {
+          res.end();
+        });
+      } else {
+        res.end();
+      }
+    } catch (err: any) {
+      console.error('Stream proxy error:', err);
+      res.status(500).send(`Stream proxy failure: ${err.message}`);
     }
   });
 

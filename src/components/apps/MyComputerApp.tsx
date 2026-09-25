@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { FileItem } from '../../types';
 import { playMouseClick, playHddSeek } from '../../utils/audio';
 import { ArrowLeft, ArrowUp, Folder, HardDrive, CheckCircle2 } from 'lucide-react';
+import { VlcConeIcon } from './vlc/VlcConeIcon';
 
 interface MyComputerAppProps {
   onOpenFile: (file: FileItem) => void;
@@ -116,6 +117,21 @@ table, td { border: 1px dashed #00ffff; }
         name: 'Downloads',
         type: 'folder',
         subItems: [
+          {
+            id: 'bunny_video',
+            name: 'CyberCafe_Intro_2004.mp4',
+            type: 'mp4',
+            size: '1.1 MB',
+            modified: '08/15/2004',
+            content: '/samples/cyber_cafe_sample.mp4',
+          },
+          {
+            id: 'vlc_installer',
+            name: 'vlc-0.8.6-win32.exe',
+            type: 'exe',
+            size: '8.4 MB',
+            modified: '08/14/2004',
+          },
           {
             id: 'numb_mp3',
             name: 'Linkin_Park_Numb.mp3',
@@ -490,13 +506,24 @@ export const MyComputerApp: React.FC<MyComputerAppProps> = ({ onOpenFile }) => {
                     }`}
                   >
                     {/* Item Type Icon */}
-                    <div className="text-3xl mb-1 select-none">
+                    <div className="text-3xl mb-1 select-none flex items-center justify-center h-9">
                       {item.type === 'folder' && (isDropTargetOver ? '📂' : '📁')}
                       {item.type === 'txt' && '📄'}
                       {item.type === 'doc' && '📝'}
                       {item.type === 'jpg' && '🖼️'}
                       {item.type === 'mp3' && '🎵'}
-                      {item.type === 'exe' && '🎮'}
+                      {(item.type === 'mp4' || item.type === 'avi' || item.type === 'wmv') && (
+                        <div className="flex items-center justify-center">
+                          <VlcConeIcon size={30} />
+                        </div>
+                      )}
+                      {item.type === 'exe' && (
+                        item.id.includes('vlc') ? (
+                          <div className="flex items-center justify-center">
+                            <VlcConeIcon size={30} />
+                          </div>
+                        ) : '🎮'
+                      )}
                       {item.type === 'html' && '🌐'}
                     </div>
 
