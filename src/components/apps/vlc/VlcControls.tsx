@@ -23,6 +23,7 @@ interface VlcControlsProps {
   isPaused: boolean;
   currentTime: number;
   duration: number;
+  bufferedEnd?: number;
   volume: number; // 0 to 125
   isMuted: boolean;
   playbackRate: number;
@@ -49,6 +50,7 @@ export const VlcControls: React.FC<VlcControlsProps> = ({
   isPaused,
   currentTime,
   duration,
+  bufferedEnd = 0,
   volume,
   isMuted,
   playbackRate,
@@ -86,6 +88,8 @@ export const VlcControls: React.FC<VlcControlsProps> = ({
 
   const effectiveTime = isSeeking ? seekVal : currentTime;
   const progressPercent = duration > 0 ? (effectiveTime / duration) * 100 : 0;
+  const effectiveBuffered = Math.max(effectiveTime, bufferedEnd);
+  const bufferedPercent = duration > 0 ? Math.min(100, (effectiveBuffered / duration) * 100) : 0;
 
   const handleSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseFloat(e.target.value);
@@ -122,7 +126,7 @@ export const VlcControls: React.FC<VlcControlsProps> = ({
             disabled={!duration}
             className="w-full h-2.5 bg-[#d8d4c4] rounded-none border border-[#7f9db9] appearance-none cursor-pointer accent-[#2266bb] focus:outline-none disabled:opacity-50"
             style={{
-              background: `linear-gradient(to right, #316ac5 0%, #4a8bf5 ${progressPercent}%, #dcd8c8 ${progressPercent}%, #dcd8c8 100%)`,
+              background: `linear-gradient(to right, #316ac5 0%, #4a8bf5 ${progressPercent}%, #9bbce6 ${progressPercent}%, #9bbce6 ${bufferedPercent}%, #dcd8c8 ${bufferedPercent}%, #dcd8c8 100%)`,
             }}
           />
         </div>

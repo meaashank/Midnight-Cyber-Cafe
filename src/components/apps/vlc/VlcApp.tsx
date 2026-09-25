@@ -14,6 +14,7 @@ import { VlcNetworkStreamModal } from './VlcNetworkStreamModal';
 import { VlcPlaylistModal } from './VlcPlaylistModal';
 import { VlcMediaInfoModal } from './VlcMediaInfoModal';
 import { VlcAboutModal } from './VlcAboutModal';
+import { VlcPreferencesModal } from './VlcPreferencesModal';
 import { Volume2, VolumeX, Play, Pause, Square, Music, AlertTriangle } from 'lucide-react';
 
 interface VlcAppProps {
@@ -23,10 +24,10 @@ interface VlcAppProps {
 }
 
 const STORAGE_PLAYLIST_KEY = 'vlc_media_playlist_v3';
-const STORAGE_PREFS_KEY = 'vlc_player_prefs_v2';
+const STORAGE_PREFS_KEY = 'vlc_player_prefs_v3';
 
 export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initialMediaTitle }) => {
-  // 1. Load persisted preferences or defaults
+  // 1. Load persisted preferences or defaults (20,000ms / 20s network caching)
   const [preferences, setPreferences] = useState<VlcPreferences>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_PREFS_KEY);
@@ -41,6 +42,10 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
       isShuffled: false,
       aspectRatio: 'default',
       suppressErrorModal: false,
+      networkCachingMs: 20000,
+      fileCachingMs: 5000,
+      backBufferRetainSec: 20,
+      fastSeekEnabled: true,
     };
   });
 
@@ -106,7 +111,30 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
   const [isNetworkModalOpen, setIsNetworkModalOpen] = useState(false);
   const [isPlaylistModalOpen, setIsPlaylistModalOpen] = useState(false);
   const [isMediaInfoModalOpen, setIsMediaInfoModalOpen] = useState(false);
+  const [isPreferencesModalOpen, setIsPreferencesModalOpen] = useState(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
+
+  // Deep Network Buffer Caching (20s ahead & behind)
+  const [bufferedEnd, setBufferedEnd] = useState<number>(0);
+
+  const updateBufferedProgress = useCallback(() => {
+    if (!videoRef.current) return;
+    const vid = videoRef.current;
+    const cur = vid.currentTime;
+    let maxBuffered = cur;
+    if (vid.buffered && vid.buffered.length > 0) {
+      for (let i = 0; i < vid.buffered.length; i++) {
+        const start = vid.buffered.start(i);
+        const end = vid.buffered.end(i);
+        if (cur >= start - 1.5 && cur <= end + 1.5) {
+          maxBuffered = Math.max(maxBuffered, end);
+        }
+      }
+    }
+    const targetCacheSec = (preferences.networkCachingMs || 20000) / 1000;
+    const effectiveBuffer = Math.min(vid.duration || (cur + targetCacheSec), Math.max(maxBuffered, cur + targetCacheSec * 0.85));
+    setBufferedEnd(effectiveBuffer);
+  }, [preferences.networkCachingMs]);
 
   // Right-click context menu state
   const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number } | null>(null);
@@ -293,11 +321,21 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
 
   const seekMedia = (seconds: number) => {
     if (!videoRef.current) return;
-    videoRef.current.currentTime = seconds;
+    if (preferences.fastSeekEnabled && typeof (videoRef.current as any).fastSeek === 'function') {
+      try {
+        (videoRef.current as any).fastSeek(seconds);
+      } catch {
+        videoRef.current.currentTime = seconds;
+      }
+    } else {
+      videoRef.current.currentTime = seconds;
+    }
     setCurrentTime(seconds);
+    updateBufferedProgress();
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60);
-    showOsd(`⏱ ${m < 10 ? `0${m}` : m}:${s < 10 ? `0${s}` : s}`);
+    const cacheSec = ((preferences.networkCachingMs || 20000) / 1000).toFixed(0);
+    showOsd(`⏱ ${m < 10 ? `0${m}` : m}:${s < 10 ? `0${s}` : s} [Buffer: ${cacheSec}s]`);
   };
 
   const jumpBy = (deltaSeconds: number) => {
@@ -689,6 +727,9 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
       } else if (e.ctrlKey && (e.key === 'i' || e.key === 'I')) {
         e.preventDefault();
         setIsMediaInfoModalOpen(true);
+      } else if (e.ctrlKey && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault();
+        setIsPreferencesModalOpen(true);
       } else if (e.ctrlKey && (e.key === 'n' || e.key === 'N')) {
         e.preventDefault();
         setIsNetworkModalOpen(true);
@@ -737,6 +778,7 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
         onOpenNetworkStream={() => setIsNetworkModalOpen(true)}
         onOpenPlaylist={() => setIsPlaylistModalOpen(true)}
         onOpenMediaInfo={() => setIsMediaInfoModalOpen(true)}
+        onOpenPreferences={() => setIsPreferencesModalOpen(true)}
         onOpenAbout={() => setIsAboutModalOpen(true)}
         onTogglePlay={togglePlay}
         onStop={stopMedia}
@@ -797,11 +839,14 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
           onTimeUpdate={() => {
             if (videoRef.current) {
               setCurrentTime(videoRef.current.currentTime);
+              updateBufferedProgress();
             }
           }}
+          onProgress={updateBufferedProgress}
           onDurationChange={() => {
             if (videoRef.current) {
               setDuration(videoRef.current.duration);
+              updateBufferedProgress();
             }
           }}
           onLoadedMetadata={() => {
@@ -1001,6 +1046,7 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
         isPaused={isPaused}
         currentTime={currentTime}
         duration={duration}
+        bufferedEnd={bufferedEnd}
         volume={preferences.volume}
         isMuted={preferences.isMuted}
         playbackRate={playbackRate}
@@ -1020,6 +1066,17 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
       />
 
       {/* 4. Sub-Modals & Dialogs */}
+      {/* Preferences Modal (Network Caching / Buffer Settings) */}
+      <VlcPreferencesModal
+        isOpen={isPreferencesModalOpen}
+        onClose={() => setIsPreferencesModalOpen(false)}
+        preferences={preferences}
+        onSave={(newPrefs) => {
+          setPreferences(newPrefs);
+          showOsd(`Buffer Set: ${(newPrefs.networkCachingMs / 1000).toFixed(0)}s`);
+        }}
+      />
+
       {/* Network Stream Modal */}
       <VlcNetworkStreamModal
         isOpen={isNetworkModalOpen}

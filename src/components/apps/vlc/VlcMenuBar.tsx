@@ -5,6 +5,7 @@ interface VlcMenuBarProps {
   onOpenNetworkStream: () => void;
   onOpenPlaylist: () => void;
   onOpenMediaInfo: () => void;
+  onOpenPreferences?: () => void;
   onOpenAbout: () => void;
   onTogglePlay: () => void;
   onStop: () => void;
@@ -33,6 +34,7 @@ export const VlcMenuBar: React.FC<VlcMenuBarProps> = ({
   onOpenNetworkStream,
   onOpenPlaylist,
   onOpenMediaInfo,
+  onOpenPreferences,
   onOpenAbout,
   onTogglePlay,
   onStop,
@@ -340,6 +342,14 @@ export const VlcMenuBar: React.FC<VlcMenuBarProps> = ({
               className="px-4 py-1 hover:bg-[#316ac5] hover:text-white cursor-pointer"
             >
               Codec Information
+            </div>
+            <div className="border-t border-[#d4d0c8] my-0.5" />
+            <div
+              onClick={() => handleAction(() => onOpenPreferences && onOpenPreferences())}
+              className="px-4 py-1 hover:bg-[#316ac5] hover:text-white cursor-pointer flex justify-between"
+            >
+              <span>Preferences (Buffer & Cache)</span>
+              <span className="text-gray-400">Ctrl+P</span>
             </div>
           </div>
         )}

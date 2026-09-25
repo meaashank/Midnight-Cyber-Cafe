@@ -515,6 +515,60 @@ router.get(['/live-feed', '/api/live-feed'], async (req, res) => {
   return res.json({ items: [] });
 });
 
+// Live Stream Proxy with HTTP 206 Partial Content (Byte-Range) Support
+router.get(['/stream', '/api/stream', '/stream-proxy', '/api/stream-proxy'], async (req, res) => {
+  try {
+    const targetUrl = (req.query.url as string || '').trim();
+    if (!targetUrl || !targetUrl.startsWith('http')) {
+      return res.status(400).send('Invalid or missing stream URL');
+    }
+
+    const headers: Record<string, string> = {
+      'User-Agent': 'VLC/0.8.6 (Midnight Cyber Cafe Stream Client)',
+      'Accept': '*/*',
+    };
+
+    if (req.headers.range) {
+      headers['Range'] = req.headers.range;
+    }
+
+    const response = await fetch(targetUrl, { headers });
+
+    const contentType = response.headers.get('content-type');
+    if (contentType) res.setHeader('Content-Type', contentType);
+
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Accept-Ranges', 'bytes');
+
+    const contentLength = response.headers.get('content-length');
+    if (contentLength) res.setHeader('Content-Length', contentLength);
+
+    const contentRange = response.headers.get('content-range');
+    if (contentRange) res.setHeader('Content-Range', contentRange);
+
+    res.status(response.status);
+
+    if (response.body) {
+      const reader = response.body.getReader();
+      const pump = async () => {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(Buffer.from(value));
+        }
+        res.end();
+      };
+      pump().catch(() => {
+        res.end();
+      });
+    } else {
+      res.end();
+    }
+  } catch (err: any) {
+    res.status(500).send(`Stream proxy failure: ${err.message}`);
+  }
+});
+
 app.use(router);
 app.use('/api', router);
 

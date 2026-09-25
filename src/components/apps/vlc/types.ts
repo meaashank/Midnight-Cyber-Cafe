@@ -40,6 +40,8 @@ export interface VlcEngineState {
   isStopped: boolean;
   currentTime: number;
   duration: number;
+  bufferedEnd: number; // Deep pre-buffer end time in seconds
+  bufferedPercent: number; // Percent of track buffered in RAM/cache
   volume: number; // 0 to 125 (classic VLC can boost past 100%)
   isMuted: boolean;
   playbackRate: number; // 0.25, 0.5, 1.0, 1.25, 1.5, 2.0
@@ -62,6 +64,10 @@ export interface VlcPreferences {
   isShuffled: boolean;
   aspectRatio: 'default' | '16:9' | '4:3' | 'fill';
   suppressErrorModal?: boolean;
+  networkCachingMs: number; // e.g. 20000 ms (20 seconds)
+  fileCachingMs: number; // e.g. 5000 ms
+  backBufferRetainSec: number; // e.g. 20 seconds
+  fastSeekEnabled: boolean;
 }
 
 /**
