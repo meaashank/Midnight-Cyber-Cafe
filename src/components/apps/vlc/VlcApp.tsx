@@ -15,6 +15,8 @@ import { VlcPlaylistModal } from './VlcPlaylistModal';
 import { VlcMediaInfoModal } from './VlcMediaInfoModal';
 import { VlcAboutModal } from './VlcAboutModal';
 import { VlcPreferencesModal } from './VlcPreferencesModal';
+import { VlcMessagesModal, VlcLogEntry } from './VlcMessagesModal';
+import { VlcErrorDialog } from './VlcErrorDialog';
 import { Volume2, VolumeX, Play, Pause, Square, Music, AlertTriangle } from 'lucide-react';
 
 interface VlcAppProps {
@@ -112,7 +114,32 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
   const [isPlaylistModalOpen, setIsPlaylistModalOpen] = useState(false);
   const [isMediaInfoModalOpen, setIsMediaInfoModalOpen] = useState(false);
   const [isPreferencesModalOpen, setIsPreferencesModalOpen] = useState(false);
+  const [isMessagesModalOpen, setIsMessagesModalOpen] = useState(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
+
+  // Diagnostic Error & Logging System
+  const [logs, setLogs] = useState<VlcLogEntry[]>(() => [
+    {
+      timestamp: new Date().toTimeString().split(' ')[0],
+      level: 'info',
+      module: 'main',
+      message: 'VLC media player 0.8.6 Janice initialised with deep 20s caching',
+    },
+  ]);
+  const [errorModalData, setErrorModalData] = useState<{
+    title: string;
+    message: string;
+    details?: string;
+    url?: string;
+  } | null>(null);
+
+  const addLog = useCallback(
+    (level: 'info' | 'warn' | 'error' | 'debug', module: string, message: string) => {
+      const timestamp = new Date().toTimeString().split(' ')[0];
+      setLogs((prev) => [...prev.slice(-150), { timestamp, level, module, message }]);
+    },
+    []
+  );
 
   // Deep Network Buffer Caching (20s ahead & behind)
   const [bufferedEnd, setBufferedEnd] = useState<number>(0);
@@ -272,6 +299,9 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
       const targetTrack = currentTrack || playlist[0] || DEFAULT_VLC_PLAYLIST[0];
       const targetUrl = targetTrack.url;
 
+      addLog('info', 'input', `Opening media stream: ${targetTrack.title} (${targetUrl})`);
+      addLog('debug', 'cache', `Network caching buffer initialized to ${preferences.networkCachingMs} ms`);
+
       if (!videoRef.current.src || !videoRef.current.src.includes(targetUrl)) {
         videoRef.current.src = targetUrl;
         videoRef.current.load();
@@ -283,11 +313,12 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
       setIsPaused(false);
       setStatusText(`Playing: ${targetTrack.title || 'Media'}`);
       showOsd('▶ Play');
+      addLog('info', 'decoder', `Playback started successfully. Resolution: ${videoRef.current.videoWidth || 'audio'}x${videoRef.current.videoHeight || 'audio'}`);
     } catch (err: any) {
       setIsBuffering(false);
       setIsPlaying(false);
       setIsPaused(false);
-      handlePlaybackError(err);
+      handlePlaybackError(err, currentTrack?.url);
     }
   };
 
@@ -298,6 +329,7 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
     setIsPaused(true);
     setStatusText(`Paused: ${currentTrack?.title || 'Media'}`);
     showOsd('⏸ Pause');
+    addLog('debug', 'input', 'Media paused by user');
   };
 
   const togglePlay = () => {
@@ -317,6 +349,7 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
     setCurrentTime(0);
     setStatusText('Stopped');
     showOsd('⏹ Stop');
+    addLog('debug', 'input', 'Media stopped');
   };
 
   const seekMedia = (seconds: number) => {
@@ -336,6 +369,7 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
     const s = Math.floor(seconds % 60);
     const cacheSec = ((preferences.networkCachingMs || 20000) / 1000).toFixed(0);
     showOsd(`⏱ ${m < 10 ? `0${m}` : m}:${s < 10 ? `0${s}` : s} [Buffer: ${cacheSec}s]`);
+    addLog('debug', 'stream', `Seeked to ${seconds.toFixed(2)}s (Buffer target: ${cacheSec}s)`);
   };
 
   const jumpBy = (deltaSeconds: number) => {
@@ -364,6 +398,7 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
       videoRef.current.playbackRate = rate;
       setPlaybackRate(rate);
       showOsd(`Speed: ${rate.toFixed(2)}x`);
+      addLog('debug', 'stream', `Playback rate changed to ${rate}x`);
     }
   };
 
@@ -387,6 +422,7 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
     setCurrentIndex(index);
     const track = playlist[index];
     if (videoRef.current && track?.url) {
+      addLog('info', 'playlist', `Loading track [${index + 1}/${playlist.length}]: ${track.title}`);
       setIsBuffering(true);
       videoRef.current.pause();
       videoRef.current.src = track.url;
@@ -399,14 +435,16 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
           setIsPaused(false);
           setStatusText(`Playing: ${track.title}`);
           showOsd(`▶ ${track.title}`);
+          addLog('info', 'decoder', `Playing ${track.title} successfully`);
         })
         .catch((err) => {
           setIsBuffering(false);
           setIsPlaying(false);
           setIsPaused(false);
 
-          // If external stream failed directly, try streaming through backend proxy
+          // If external stream failed directly (e.g. CORS), try streaming through backend proxy
           if (track.url.startsWith('http') && !track.url.includes('/api/stream') && videoRef.current) {
+            addLog('warn', 'network', `Direct stream blocked/failed for ${track.url}. Retrying via Cyber Café Stream Proxy...`);
             const proxyUrl = `/api/stream?url=${encodeURIComponent(track.url)}`;
             videoRef.current.src = proxyUrl;
             videoRef.current.load();
@@ -416,8 +454,9 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
                 setIsBuffering(false);
                 setIsPlaying(true);
                 setIsPaused(false);
-                setStatusText(`Playing: ${track.title}`);
+                setStatusText(`Playing: ${track.title} (Proxied)`);
                 showOsd(`▶ ${track.title}`);
+                addLog('info', 'stream_proxy', `Stream proxy connected successfully for ${track.title}`);
               })
               .catch((proxyErr) => {
                 handlePlaybackError(proxyErr, track.url);
@@ -463,9 +502,23 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
     }
   };
 
-  // 5. Silent & Clean Error Handling for Network Streams
+  // 5. Diagnostic Error Handling with Dialog and Log Support
   const handlePlaybackError = (err?: any, failedUrl?: string) => {
-    console.warn('[VLC Stream Notice]:', err?.message || err || 'Stream format or connection event', failedUrl);
+    const rawMsg = err?.message || 'Media decode failure or network stream unreachable.';
+    const url = failedUrl || currentTrack?.url || 'media';
+    const cleanMsg = rawMsg.includes('play()') ? 'Playback was interrupted or requires user permission.' : rawMsg;
+
+    addLog('error', 'decoder', `Stream connection failed: ${cleanMsg} (URL: ${url})`);
+    setStatusText(`Error: Could not open media`);
+
+    if (!preferences.suppressErrorModal) {
+      setErrorModalData({
+        title: 'VLC (v0.8.6) - Stream Connection Error',
+        message: 'VLC could not decode this media stream or the remote host refused connection.',
+        details: `${cleanMsg}\n\nTarget Stream: ${url}\nNetwork Caching: ${preferences.networkCachingMs} ms`,
+        url,
+      });
+    }
   };
 
   // 6. Network Stream Feature Implementation
@@ -497,6 +550,8 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
         ? `/api/stream?url=${encodeURIComponent(url)}`
         : url;
 
+    addLog('info', 'input', `Adding network stream to playlist: ${cleanTitle}`);
+
     const newTrack: MediaTrack = {
       id: `stream_${Date.now()}`,
       title: cleanTitle,
@@ -523,6 +578,7 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
           setIsPaused(false);
           setStatusText(`Playing: ${cleanTitle}`);
           showOsd(`▶ ${cleanTitle}`);
+          addLog('info', 'decoder', `Stream started: ${cleanTitle}`);
         })
         .catch((err) => {
           setIsBuffering(false);
@@ -531,6 +587,7 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
 
           // Retry via stream proxy if direct play failed
           if (!finalUrl.includes('/api/stream') && finalUrl.startsWith('http') && videoRef.current) {
+            addLog('warn', 'network', `Direct load failed for ${url}. Attempting stream proxy...`);
             const proxyUrl = `/api/stream?url=${encodeURIComponent(url)}`;
             videoRef.current.src = proxyUrl;
             videoRef.current.load();
@@ -542,6 +599,7 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
                 setIsPaused(false);
                 setStatusText(`Playing: ${cleanTitle}`);
                 showOsd(`▶ ${cleanTitle}`);
+                addLog('info', 'stream_proxy', `Stream proxy connected successfully for ${cleanTitle}`);
               })
               .catch((proxyErr) => {
                 handlePlaybackError(proxyErr, url);
@@ -730,6 +788,9 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
       } else if (e.ctrlKey && (e.key === 'p' || e.key === 'P')) {
         e.preventDefault();
         setIsPreferencesModalOpen(true);
+      } else if (e.ctrlKey && (e.key === 'm' || e.key === 'M')) {
+        e.preventDefault();
+        setIsMessagesModalOpen(true);
       } else if (e.ctrlKey && (e.key === 'n' || e.key === 'N')) {
         e.preventDefault();
         setIsNetworkModalOpen(true);
@@ -779,6 +840,7 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
         onOpenPlaylist={() => setIsPlaylistModalOpen(true)}
         onOpenMediaInfo={() => setIsMediaInfoModalOpen(true)}
         onOpenPreferences={() => setIsPreferencesModalOpen(true)}
+        onOpenMessages={() => setIsMessagesModalOpen(true)}
         onOpenAbout={() => setIsAboutModalOpen(true)}
         onTogglePlay={togglePlay}
         onStop={stopMedia}
@@ -832,8 +894,9 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
           ref={videoRef}
           src={currentTrack?.url}
           playsInline
+          preload="auto"
           className={`w-full h-full ${
-            currentTrack?.format === 'audio' || (!isPlaying && !isPaused) ? 'hidden' : 'block'
+            currentTrack?.format === 'audio' ? 'hidden' : 'block'
           }`}
           style={getAspectRatioStyle()}
           onTimeUpdate={() => {
@@ -856,35 +919,54 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
                 width: videoRef.current.videoWidth,
                 height: videoRef.current.videoHeight,
               });
+              addLog(
+                'info',
+                'decoder',
+                `Metadata loaded: ${videoRef.current.videoWidth}x${videoRef.current.videoHeight}, duration: ${videoRef.current.duration.toFixed(1)}s`
+              );
             }
           }}
-          onWaiting={() => setIsBuffering(true)}
+          onCanPlay={() => {
+            addLog('debug', 'stream', 'Stream has buffered enough data to start playback');
+          }}
+          onWaiting={() => {
+            setIsBuffering(true);
+            addLog('debug', 'cache', 'Waiting for network buffer chunks...');
+          }}
           onPlaying={() => {
             setIsBuffering(false);
             setIsPlaying(true);
             setIsPaused(false);
           }}
           onEnded={() => {
+            addLog('info', 'playlist', 'Track finished playing');
             nextTrack();
           }}
           onError={() => {
             setIsBuffering(false);
-            if (isPlaying) {
-              setIsPlaying(false);
-              handlePlaybackError();
+            setIsPlaying(false);
+            setIsPaused(false);
+            const mediaErr = videoRef.current?.error;
+            let errMsg = 'Playback decoding failed';
+            if (mediaErr) {
+              if (mediaErr.code === 1) errMsg = 'MEDIA_ERR_ABORTED: Playback aborted by user';
+              else if (mediaErr.code === 2) errMsg = 'MEDIA_ERR_NETWORK: Network stream connection lost';
+              else if (mediaErr.code === 3) errMsg = 'MEDIA_ERR_DECODE: Audio/Video codec decode error';
+              else if (mediaErr.code === 4) errMsg = 'MEDIA_ERR_SRC_NOT_SUPPORTED: Stream format not supported or blocked by CORS';
             }
+            handlePlaybackError(new Error(errMsg), currentTrack?.url);
           }}
         />
 
         {/* Idle State: Authentic VLC Cone Watermark when stopped or no media loaded */}
-        {(!isPlaying && !isPaused) && (
-          <div className="flex flex-col items-center justify-center text-center p-6 space-y-3 pointer-events-none select-none">
+        {(!isPlaying && !isPaused && (!currentTrack || currentTime === 0)) && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 space-y-3 pointer-events-none select-none bg-black/80">
             <div className="relative">
               <VlcConeIcon size={96} className="opacity-90 drop-shadow-[0_8px_16px_rgba(0,0,0,0.8)]" />
             </div>
             <div>
               <div className="text-white/80 font-bold text-sm tracking-wide">
-                VLC media player
+                VLC media player (v0.8.6)
               </div>
               <div className="text-gray-400 text-[10.5px] mt-0.5">
                 Drop audio or video files here, or use Media &gt; Open Network Stream...
@@ -1139,6 +1221,29 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
       <VlcAboutModal
         isOpen={isAboutModalOpen}
         onClose={() => setIsAboutModalOpen(false)}
+      />
+
+      {/* VLC Messages & Error Console (Tools > Messages / Ctrl+M) */}
+      <VlcMessagesModal
+        isOpen={isMessagesModalOpen}
+        onClose={() => setIsMessagesModalOpen(false)}
+        logs={logs}
+        onClearLogs={() => setLogs([])}
+      />
+
+      {/* Diagnostic Stream Error Dialog */}
+      <VlcErrorDialog
+        error={errorModalData}
+        onClose={() => setErrorModalData(null)}
+        onPlayDemo={() => {
+          setErrorModalData(null);
+          playTrackAtIndex(0);
+        }}
+        onDisableAutoPopups={() => {
+          setPreferences((p) => ({ ...p, suppressErrorModal: true }));
+          setErrorModalData(null);
+          showOsd('Error Popups: Disabled (View via Tools > Messages)');
+        }}
       />
     </div>
   );
