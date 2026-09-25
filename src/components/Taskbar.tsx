@@ -710,9 +710,6 @@ export const Taskbar: React.FC<TaskbarProps> = ({
                   className="w-full bg-white border border-[#7f9db9] px-2 py-1 text-xs font-mono rounded-xs outline-none focus:border-[#0055ea] text-black"
                   placeholder="e.g. aashank"
                 />
-                <div className="text-[9.5px] text-[#003399] mt-1 italic">
-                  Note: Name is case-sensitive (e.g. &quot;aashank&quot; unlocks Bhavya on AIM).
-                </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-2 border-t border-[#d4d0c8]">

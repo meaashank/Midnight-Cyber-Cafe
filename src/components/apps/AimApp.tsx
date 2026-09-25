@@ -330,6 +330,7 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
           buddy: selectedBuddy,
           message: textSent,
           history: historyContext,
+          userScreenName: myUsername,
         }),
       });
 

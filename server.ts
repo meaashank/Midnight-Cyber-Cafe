@@ -40,22 +40,26 @@ async function startServer() {
     persona,
     prompt,
     history = [],
+    userScreenName = 'Cabin 04 Friend',
   }: {
     persona: any;
     prompt: string;
     history?: Array<{ from: string; text: string }>;
+    userScreenName?: string;
   }): Promise<{ reply: string; provider: string; model?: string }> {
     const openRouterKey =
       process.env.OPENROUTER_API_KEY_CHAT ||
       process.env.OPENROUTER_AI_CHAT_FRIENDS ||
       process.env.OPENROUTER_API_KEY;
 
+    const userContextInfo = `The user chatting with you currently has the screen name "${userScreenName}".`;
+
     // 1. Try OpenRouter with smart open-source models
     if (openRouterKey) {
       const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
         {
           role: 'system',
-          content: `${persona.systemInstruction}\n\nIMPORTANT FORMATTING RULE: Keep replies concise (1 to 3 short sentences max) in true authentic 2004 AIM style. Use authentic 2004 internet slang, emoticons, and tone. Never talk like an AI assistant.`,
+          content: `${persona.systemInstruction}\n\n${userContextInfo}\n\nIMPORTANT FORMATTING RULE: Keep replies concise (1 to 3 short sentences max) in true authentic 2004 AIM style. Use authentic 2004 internet slang, emoticons, and tone. Never talk like an AI assistant.`,
         },
       ];
 
@@ -135,7 +139,7 @@ async function startServer() {
         let aiResponse;
         try {
           aiResponse = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3.8-flash',
             contents,
             config: {
               systemInstruction: persona.systemInstruction,
@@ -145,7 +149,7 @@ async function startServer() {
           });
         } catch {
           aiResponse = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-lite',
+            model: 'gemini-3.1-flash-lite',
             contents,
             config: {
               systemInstruction: persona.systemInstruction,
@@ -196,7 +200,7 @@ async function startServer() {
   // API 1.5: AIM Persona Chat Endpoint powered by OpenRouter / Gemini AI
   app.post('/api/aim/chat', async (req, res) => {
     try {
-      const { buddy, message, history } = req.body;
+      const { buddy, message, history, userScreenName } = req.body;
       const persona =
         AIM_PERSONAS[buddy] ||
         Object.values(AIM_PERSONAS).find(
@@ -211,6 +215,7 @@ async function startServer() {
         persona,
         prompt: message || 'hey',
         history,
+        userScreenName,
       });
 
       return res.json({
