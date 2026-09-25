@@ -7,8 +7,9 @@ import {
   playKeyClick,
   playMouseClick,
 } from '../../utils/audio';
-import { BellRing, Sparkles } from 'lucide-react';
+import { BellRing, Sparkles, Download, FileDown, Check } from 'lucide-react';
 import { AIM_PERSONAS } from '../../config/aimPersonas';
+import { downloadAimChatHtml } from '../../utils/aimChatExporter';
 
 interface AimAppProps {
   onTriggerBuzz: () => void;
@@ -47,28 +48,142 @@ const INITIAL_BUDDIES: AimBuddy[] = [
   },
 ];
 
+const STORAGE_AIM_CHATS_KEY = 'cyber_cafe_aim_chat_history_v1';
+const STORAGE_AIM_SELECTED_BUDDY_KEY = 'cyber_cafe_aim_selected_buddy_v1';
+const STORAGE_AIM_MY_STATUS_KEY = 'cyber_cafe_aim_my_status_v1';
+const STORAGE_AIM_CUSTOM_STATUS_MSG_KEY = 'cyber_cafe_aim_custom_status_msg_v1';
+
+const DEFAULT_INITIAL_CHAT_HISTORY: Record<string, AimMessage[]> = {
+  xX_bhavya_core_Xx: [
+    { id: '1', from: 'xX_bhavya_core_Xx', text: 'hey are you still at Cabin 04?', time: '10:42 PM' },
+    { id: '2', from: 'me', text: 'yeah, listening to some songs on Winamp', time: '10:43 PM' },
+    { id: '3', from: 'xX_bhavya_core_Xx', text: 'send me that Linkin park track if it finishes! ;)', time: '10:44 PM' },
+  ],
+  CyberCafeAdmin: [
+    { id: '1', from: 'CyberCafeAdmin', text: 'Welcome to Cabin 04. Your terminal is active. Please let front desk know if you require laser printing or drinks.', time: '10:15 PM' },
+  ],
+  sk8rboi2004: [
+    { id: '1', from: 'sk8rboi2004', text: 'yo log into Counter-Strike server 192.168.1.104', time: '10:30 PM' },
+  ],
+};
+
 export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
   const [buddies] = useState<AimBuddy[]>(INITIAL_BUDDIES);
-  const [selectedBuddy, setSelectedBuddy] = useState<string>('xX_bhavya_core_Xx');
-  const [myStatusMessage] = useState<string>('listening to music @ cabin 04');
-  const [myStatus, setMyStatus] = useState<'online' | 'away'>('online');
+
+  // 1. Persistent selected buddy from browser cache
+  const [selectedBuddy, setSelectedBuddy] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_AIM_SELECTED_BUDDY_KEY);
+      if (saved && INITIAL_BUDDIES.some((b) => b.screenName === saved)) {
+        return saved;
+      }
+    } catch {
+      // ignore
+    }
+    return 'xX_bhavya_core_Xx';
+  });
+
+  // 2. Persistent status message from browser cache
+  const [myStatusMessage, setMyStatusMessage] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_AIM_CUSTOM_STATUS_MSG_KEY);
+      if (saved) return saved;
+    } catch {
+      // ignore
+    }
+    return 'listening to music @ cabin 04';
+  });
+
+  // 3. Persistent online/away status from browser cache
+  const [myStatus, setMyStatus] = useState<'online' | 'away'>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_AIM_MY_STATUS_KEY);
+      if (saved === 'online' || saved === 'away') return saved;
+    } catch {
+      // ignore
+    }
+    return 'online';
+  });
+
   const [inputText, setInputText] = useState('');
   const [isBuzzing, setIsBuzzing] = useState(false);
   const [isBuddyTyping, setIsBuddyTyping] = useState(false);
+  const [isEditingStatus, setIsEditingStatus] = useState(false);
+  const [tempStatusText, setTempStatusText] = useState('');
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
 
-  const [chatHistory, setChatHistory] = useState<Record<string, AimMessage[]>>({
-    xX_bhavya_core_Xx: [
-      { id: '1', from: 'xX_bhavya_core_Xx', text: 'hey are you still at Cabin 04?', time: '10:42 PM' },
-      { id: '2', from: 'me', text: 'yeah, listening to some songs on Winamp', time: '10:43 PM' },
-      { id: '3', from: 'xX_bhavya_core_Xx', text: 'send me that Linkin park track if it finishes! ;)', time: '10:44 PM' },
-    ],
-    CyberCafeAdmin: [
-      { id: '1', from: 'CyberCafeAdmin', text: 'Welcome to Cabin 04. Your terminal is active. Please let front desk know if you require laser printing or drinks.', time: '10:15 PM' },
-    ],
-    sk8rboi2004: [
-      { id: '1', from: 'sk8rboi2004', text: 'yo log into Counter-Strike server 192.168.1.104', time: '10:30 PM' },
-    ],
+  // 4. Persistent chat history from browser cache (retained across tabs, reloads, and visits)
+  const [chatHistory, setChatHistory] = useState<Record<string, AimMessage[]>>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_AIM_CHATS_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to parse cached AIM chats:', e);
+    }
+    return DEFAULT_INITIAL_CHAT_HISTORY;
   });
+
+  // Export chat function
+  const handleExportChat = (exportAll = false) => {
+    playMouseClick();
+    const currentMsgs = chatHistory[selectedBuddy] || [];
+    downloadAimChatHtml({
+      buddyScreenName: selectedBuddy,
+      messages: currentMsgs,
+      allChats: chatHistory,
+      buddies,
+      exportAll,
+    });
+
+    const noticeText = exportAll
+      ? 'All chat logs exported as .html!'
+      : `Chat with ${selectedBuddy} exported as .html!`;
+    setExportNotice(noticeText);
+    setTimeout(() => {
+      setExportNotice(null);
+    }, 4000);
+  };
+
+  // Automatically save chat history to browser cache whenever messages update
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_AIM_CHATS_KEY, JSON.stringify(chatHistory));
+    } catch (err) {
+      console.warn('Failed to save AIM chat history to browser cache:', err);
+    }
+  }, [chatHistory]);
+
+  // Save selected buddy to browser cache
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_AIM_SELECTED_BUDDY_KEY, selectedBuddy);
+    } catch {
+      // ignore
+    }
+  }, [selectedBuddy]);
+
+  // Save user status to browser cache
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_AIM_MY_STATUS_KEY, myStatus);
+    } catch {
+      // ignore
+    }
+  }, [myStatus]);
+
+  // Save custom status message to browser cache
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_AIM_CUSTOM_STATUS_MSG_KEY, myStatusMessage);
+    } catch {
+      // ignore
+    }
+  }, [myStatusMessage]);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
@@ -267,6 +382,17 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* Export All Conversations Button */}
+          <button
+            type="button"
+            onClick={() => handleExportChat(true)}
+            title="Export all AIM buddy chat transcripts into a single multi-tab .html log file"
+            className="flex items-center gap-1 px-2 py-0.5 bg-[#002266] hover:bg-[#003399] active:bg-[#001133] text-white rounded text-[10px] font-bold cursor-pointer border border-[#001144] shadow-xs"
+          >
+            <Download size={11} className="text-yellow-300" />
+            <span>Export All (.html)</span>
+          </button>
+
           <select
             value={myStatus}
             onChange={(e) => {
@@ -366,8 +492,54 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
           </div>
 
           {/* Away message status bar */}
-          <div className="p-1.5 bg-[#f6f6f2] border-t border-[#d4d0c8] text-[9.5px] text-gray-600 truncate">
-            Status: {myStatusMessage}
+          <div className="p-1.5 bg-[#f6f6f2] border-t border-[#d4d0c8] text-[9.5px] text-gray-600 truncate flex items-center justify-between">
+            {isEditingStatus ? (
+              <div className="flex items-center gap-1 w-full">
+                <input
+                  type="text"
+                  value={tempStatusText}
+                  autoFocus
+                  onChange={(e) => setTempStatusText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      if (tempStatusText.trim()) {
+                        setMyStatusMessage(tempStatusText.trim());
+                      }
+                      setIsEditingStatus(false);
+                    } else if (e.key === 'Escape') {
+                      setIsEditingStatus(false);
+                    }
+                  }}
+                  className="flex-1 bg-white border border-[#7f9db9] px-1 py-0.5 text-[9px] rounded-xs outline-none"
+                  placeholder="Type status message..."
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (tempStatusText.trim()) {
+                      setMyStatusMessage(tempStatusText.trim());
+                    }
+                    setIsEditingStatus(false);
+                  }}
+                  className="bg-[#ece9d8] px-1.5 py-0.5 border border-gray-400 text-[8.5px] font-bold"
+                >
+                  OK
+                </button>
+              </div>
+            ) : (
+              <div
+                onClick={() => {
+                  setTempStatusText(myStatusMessage);
+                  setIsEditingStatus(true);
+                }}
+                className="cursor-pointer hover:text-blue-700 truncate flex items-center gap-1 w-full"
+                title="Click to edit custom status message (saved in browser cache)"
+              >
+                <span className="font-bold">Status:</span>
+                <span className="truncate italic">{myStatusMessage}</span>
+                <span className="text-[8px] text-gray-400 ml-auto shrink-0">✏️</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -391,6 +563,17 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
 
             {/* Header Action Buttons */}
             <div className="flex items-center gap-1.5">
+              {/* Export Active Chat .HTML Button */}
+              <button
+                type="button"
+                onClick={() => handleExportChat(false)}
+                title={`Export this chat with ${selectedBuddy} as a standalone formatted .html file`}
+                className="flex items-center gap-1 px-2 py-0.5 bg-[#ece9d8] hover:bg-[#ded9c5] active:bg-[#ccc6b0] border border-[#7f9db9] rounded text-[10px] font-bold text-[#111] cursor-pointer shadow-xs"
+              >
+                <FileDown size={11} className="text-blue-700" />
+                <span>Export .html</span>
+              </button>
+
               {/* BUZZ Button */}
               <button
                 type="button"
@@ -407,12 +590,14 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
                 type="button"
                 onClick={() => {
                   playMouseClick();
-                  setChatHistory((prev) => ({
-                    ...prev,
-                    [selectedBuddy]: [],
-                  }));
+                  if (window.confirm(`Clear chat history with ${selectedBuddy}?`)) {
+                    setChatHistory((prev) => ({
+                      ...prev,
+                      [selectedBuddy]: [],
+                    }));
+                  }
                 }}
-                title="Clear Chat History"
+                title="Clear Chat History (Only clears when you confirm)"
                 className="w-4 h-4 bg-[#ece9d8] hover:bg-[#d8d4c4] border border-[#7f9db9] rounded-xs text-[#555] hover:text-[#000] flex items-center justify-center text-[10px] font-bold cursor-pointer"
                 aria-label="Clear chat"
               >
@@ -421,10 +606,34 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
             </div>
           </div>
 
-          {/* Persona Role Banner / Subtle hint */}
+          {/* Export Success Toast Notification */}
+          {exportNotice && (
+            <div className="bg-emerald-600 text-white px-3 py-1 text-[10px] font-bold flex items-center justify-between shadow-xs animate-in fade-in duration-200">
+              <div className="flex items-center gap-1.5">
+                <Check size={12} />
+                <span>{exportNotice} (Ready to share or open in any browser)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setExportNotice(null)}
+                className="text-emerald-100 hover:text-white text-[10px] cursor-pointer ml-2"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {/* Persona Role Banner & Browser Cache Sync indicator */}
           <div className="bg-[#fbfbf8] border-b border-[#ebe8dc] px-3 py-1 text-[9.5px] text-gray-500 flex items-center justify-between select-none">
             <span className="truncate italic">
               Tone: {activePersona?.toneDescription || 'Standard AIM Friend'}
+            </span>
+            <span
+              className="text-[9px] text-emerald-700 font-mono flex items-center gap-1 bg-emerald-50 px-1.5 py-0.5 rounded-xs border border-emerald-200"
+              title="All chat messages and conversations remain cached until browser cache is cleared"
+            >
+              <span>💾</span>
+              <span>Chats Cached</span>
             </span>
           </div>
 
