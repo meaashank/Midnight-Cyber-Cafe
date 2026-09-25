@@ -31,6 +31,8 @@ interface VlcControlsProps {
   onStop: () => void;
   onPrevious: () => void;
   onNext: () => void;
+  onJumpBackward?: () => void;
+  onJumpForward?: () => void;
   onSeek: (time: number) => void;
   onVolumeChange: (volume: number) => void;
   onToggleMute: () => void;
@@ -58,6 +60,8 @@ export const VlcControls: React.FC<VlcControlsProps> = ({
   onStop,
   onPrevious,
   onNext,
+  onJumpBackward,
+  onJumpForward,
   onSeek,
   onVolumeChange,
   onToggleMute,
@@ -106,8 +110,8 @@ export const VlcControls: React.FC<VlcControlsProps> = ({
     <div
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      className={`bg-[#ece9d8] border-t border-[#d4d0c8] select-none text-[#111] font-tahoma text-[11px] shrink-0 transition-all duration-700 ease-in-out ${
-        isVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
+      className={`bg-[#ece9d8] border-t border-[#d4d0c8] select-none text-[#111] font-tahoma text-[11px] shrink-0 transition-all duration-300 ${
+        isVisible ? 'translate-y-0 opacity-100 max-h-40' : 'translate-y-full opacity-0 max-h-0 py-0 border-t-0 overflow-hidden pointer-events-none'
       }`}
     >
       {/* 1. Time Slider Bar */}
@@ -190,6 +194,30 @@ export const VlcControls: React.FC<VlcControlsProps> = ({
             className="w-6 h-6 bg-[#ece9d8] hover:bg-[#ded9c5] active:bg-[#c9c4b0] border-2 border-t-white border-l-white border-b-[#7f9db9] border-r-[#7f9db9] active:border-t-[#7f9db9] active:border-l-[#7f9db9] active:border-b-white active:border-r-white flex items-center justify-center rounded-xs cursor-pointer text-gray-700"
           >
             <SkipForward size={11} />
+          </button>
+
+          <div className="w-[1px] h-4 bg-gray-400 mx-0.5" />
+
+          {/* Jump Backward 10s */}
+          <button
+            type="button"
+            onClick={onJumpBackward}
+            title="Jump back 10 seconds (Left Arrow / Double-tap Left)"
+            className="px-1.5 h-6 bg-[#ece9d8] hover:bg-[#ded9c5] active:bg-[#c9c4b0] border-2 border-t-white border-l-white border-b-[#7f9db9] border-r-[#7f9db9] active:border-t-[#7f9db9] active:border-l-[#7f9db9] active:border-b-white active:border-r-white flex items-center gap-0.5 rounded-xs cursor-pointer text-[#002266] font-bold text-[10px]"
+          >
+            <span>⏪</span>
+            <span>10s</span>
+          </button>
+
+          {/* Jump Forward 10s */}
+          <button
+            type="button"
+            onClick={onJumpForward}
+            title="Jump forward 10 seconds (Right Arrow / Double-tap Right)"
+            className="px-1.5 h-6 bg-[#ece9d8] hover:bg-[#ded9c5] active:bg-[#c9c4b0] border-2 border-t-white border-l-white border-b-[#7f9db9] border-r-[#7f9db9] active:border-t-[#7f9db9] active:border-l-[#7f9db9] active:border-b-white active:border-r-white flex items-center gap-0.5 rounded-xs cursor-pointer text-[#002266] font-bold text-[10px]"
+          >
+            <span>10s</span>
+            <span>⏩</span>
           </button>
 
           <div className="w-[1px] h-4 bg-gray-400 mx-0.5" />

@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import { Readable, pipeline } from 'stream';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import { AIM_PERSONAS } from './src/config/aimPersonas';
@@ -688,27 +689,39 @@ async function startServer() {
     }
   });
 
-  // API 6: Universal Media Stream Proxy for VLC media player
-  app.get('/api/stream', async (req, res) => {
+  // API 6: Universal Media Stream Proxy for VLC media player (Instant Fast Stream)
+  app.get(['/api/stream', '/api/stream-proxy'], async (req, res) => {
+    const controller = new AbortController();
+    req.on('close', () => controller.abort());
+
     try {
-      const targetUrl = req.query.url as string;
+      const targetUrl = (req.query.url as string || '').trim();
       if (!targetUrl) {
         return res.status(400).send('Missing url query parameter');
       }
 
-      // Forward headers like Range for video seeking
+      // Forward browser-like headers for maximum CDN / server compatibility
       const headers: Record<string, string> = {
-        'User-Agent': 'VLC/0.8.6c (MidnightCyberCafe; Linux)',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         Accept: '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Sec-Fetch-Dest': 'video',
+        'Sec-Fetch-Mode': 'no-cors',
+        'Sec-Fetch-Site': 'cross-site',
       };
       if (req.headers.range) {
         headers['Range'] = req.headers.range;
       }
 
+      // 15-second connect timeout
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
       const response = await fetch(targetUrl, {
         headers,
+        signal: controller.signal,
         redirect: 'follow',
       });
+      clearTimeout(timeoutId);
 
       if (!response.ok && response.status !== 206) {
         return res.status(response.status).send(`Upstream returned ${response.status}`);
@@ -719,6 +732,7 @@ async function startServer() {
       res.setHeader('Content-Type', contentType);
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
 
       const contentLength = response.headers.get('content-length');
       if (contentLength) res.setHeader('Content-Length', contentLength);
@@ -727,26 +741,39 @@ async function startServer() {
       if (contentRange) res.setHeader('Content-Range', contentRange);
 
       res.status(response.status);
+      res.flushHeaders();
 
       if (response.body) {
-        const reader = response.body.getReader();
-        const pump = async () => {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            res.write(Buffer.from(value));
+        const stream = Readable.fromWeb(response.body as any);
+        stream.on('error', (streamErr: any) => {
+          if (streamErr?.name === 'AbortError' || controller.signal.aborted) {
+            return;
           }
-          res.end();
-        };
-        pump().catch(() => {
-          res.end();
+          if (!res.writableEnded) {
+            try {
+              res.end();
+            } catch {
+              // ignore
+            }
+          }
+        });
+
+        pipeline(stream, res, (err) => {
+          if (err && err.name !== 'AbortError' && !controller.signal.aborted) {
+            // Stream ended or connection closed
+          }
         });
       } else {
         res.end();
       }
     } catch (err: any) {
-      console.error('Stream proxy error:', err);
-      res.status(500).send(`Stream proxy failure: ${err.message}`);
+      if (err?.name === 'AbortError' || controller.signal.aborted) {
+        return;
+      }
+      console.error('Stream proxy error:', err?.message || err);
+      if (!res.headersSent) {
+        res.status(500).send(`Stream proxy failure: ${err?.message || 'timeout'}`);
+      }
     }
   });
 

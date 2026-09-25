@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 
 interface VlcMenuBarProps {
+  isVisible?: boolean;
   onOpenFile: () => void;
   onOpenNetworkStream: () => void;
   onOpenPlaylist: () => void;
@@ -31,6 +32,7 @@ interface VlcMenuBarProps {
 }
 
 export const VlcMenuBar: React.FC<VlcMenuBarProps> = ({
+  isVisible = true,
   onOpenFile,
   onOpenNetworkStream,
   onOpenPlaylist,
@@ -91,7 +93,9 @@ export const VlcMenuBar: React.FC<VlcMenuBarProps> = ({
   return (
     <div
       ref={menuBarRef}
-      className="bg-[#ece9d8] border-b border-[#d4d0c8] px-1 py-0.5 flex items-center gap-0.5 text-[11px] font-tahoma text-[#111] select-none relative z-30 shrink-0"
+      className={`bg-[#ece9d8] border-b border-[#d4d0c8] px-1 py-0.5 flex items-center gap-0.5 text-[11px] font-tahoma text-[#111] select-none relative z-30 shrink-0 transition-all duration-300 ${
+        isVisible ? 'translate-y-0 opacity-100 max-h-12' : '-translate-y-full opacity-0 max-h-0 py-0 border-b-0 overflow-hidden pointer-events-none'
+      }`}
     >
       {/* Media Menu */}
       <div className="relative">

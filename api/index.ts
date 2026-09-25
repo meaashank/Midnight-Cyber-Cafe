@@ -1,4 +1,5 @@
 import express from 'express';
+import { Readable, pipeline } from 'stream';
 import { GoogleGenAI } from '@google/genai';
 
 interface AimPersona {
@@ -517,6 +518,9 @@ router.get(['/live-feed', '/api/live-feed'], async (req, res) => {
 
 // Live Stream Proxy with HTTP 206 Partial Content (Byte-Range) Support
 router.get(['/stream', '/api/stream', '/stream-proxy', '/api/stream-proxy'], async (req, res) => {
+  const controller = new AbortController();
+  req.on('close', () => controller.abort());
+
   try {
     const targetUrl = (req.query.url as string || '').trim();
     if (!targetUrl || !targetUrl.startsWith('http')) {
@@ -524,21 +528,36 @@ router.get(['/stream', '/api/stream', '/stream-proxy', '/api/stream-proxy'], asy
     }
 
     const headers: Record<string, string> = {
-      'User-Agent': 'VLC/0.8.6 (Midnight Cyber Cafe Stream Client)',
-      'Accept': '*/*',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      Accept: '*/*',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Sec-Fetch-Dest': 'video',
+      'Sec-Fetch-Mode': 'no-cors',
+      'Sec-Fetch-Site': 'cross-site',
     };
 
     if (req.headers.range) {
       headers['Range'] = req.headers.range;
     }
 
-    const response = await fetch(targetUrl, { headers });
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-    const contentType = response.headers.get('content-type');
-    if (contentType) res.setHeader('Content-Type', contentType);
+    const response = await fetch(targetUrl, {
+      headers,
+      signal: controller.signal,
+      redirect: 'follow',
+    });
+    clearTimeout(timeoutId);
 
+    if (!response.ok && response.status !== 206) {
+      return res.status(response.status).send(`Upstream returned ${response.status}`);
+    }
+
+    const contentType = response.headers.get('content-type') || 'video/mp4';
+    res.setHeader('Content-Type', contentType);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
 
     const contentLength = response.headers.get('content-length');
     if (contentLength) res.setHeader('Content-Length', contentLength);
@@ -547,25 +566,36 @@ router.get(['/stream', '/api/stream', '/stream-proxy', '/api/stream-proxy'], asy
     if (contentRange) res.setHeader('Content-Range', contentRange);
 
     res.status(response.status);
+    res.flushHeaders();
 
     if (response.body) {
-      const reader = response.body.getReader();
-      const pump = async () => {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          res.write(Buffer.from(value));
+      const stream = Readable.fromWeb(response.body as any);
+      stream.on('error', (streamErr: any) => {
+        if (streamErr?.name === 'AbortError' || controller.signal.aborted) {
+          return;
         }
-        res.end();
-      };
-      pump().catch(() => {
-        res.end();
+        if (!res.writableEnded) {
+          try {
+            res.end();
+          } catch {
+            // ignore
+          }
+        }
+      });
+
+      pipeline(stream, res, (err) => {
+        if (err && err.name !== 'AbortError' && !controller.signal.aborted) {
+          // Stream ended or connection closed
+        }
       });
     } else {
       res.end();
     }
   } catch (err: any) {
-    res.status(500).send(`Stream proxy failure: ${err.message}`);
+    if (err?.name === 'AbortError' || controller.signal.aborted) return;
+    if (!res.headersSent) {
+      res.status(500).send(`Stream proxy failure: ${err?.message || 'timeout'}`);
+    }
   }
 });
 

@@ -7,6 +7,7 @@ import {
   PlayerEngine,
 } from './types';
 import { DEFAULT_VLC_PLAYLIST } from './sampleMedia';
+import { mediaBufferManager } from './mediaBufferManager';
 import { VlcConeIcon } from './VlcConeIcon';
 import { VlcMenuBar } from './VlcMenuBar';
 import { VlcControls } from './VlcControls';
@@ -171,6 +172,18 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
   const controlsTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isHoveringControlsRef = useRef(false);
 
+  // Quick Seek Double-Tap Ripple Feedback
+  const [seekRipple, setSeekRipple] = useState<{ side: 'left' | 'right'; label: string } | null>(null);
+  const rippleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const showSeekRipple = (side: 'left' | 'right', label: string) => {
+    if (rippleTimeoutRef.current) clearTimeout(rippleTimeoutRef.current);
+    setSeekRipple({ side, label });
+    rippleTimeoutRef.current = setTimeout(() => {
+      setSeekRipple(null);
+    }, 800);
+  };
+
   const resetControlsTimer = useCallback(() => {
     setAreControlsVisible(true);
     if (controlsTimerRef.current) {
@@ -280,45 +293,112 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
     return () => clearInterval(interval);
   }, [isPlaying, isPaused]);
 
-  // Cleanup on unmount (stop playing media)
+  // Cleanup on unmount (stop playing media and revoke cached blobs)
   useEffect(() => {
+    // Preload default sample tracks into memory Blob Object URLs for instant 0ms playback & scrub
+    DEFAULT_VLC_PLAYLIST.forEach((item) => {
+      if (item.url && !item.url.startsWith('blob:')) {
+        mediaBufferManager.loadAsBlobUrl(item.url, item.mimeType).catch(() => {});
+      }
+    });
+
     return () => {
       if (videoRef.current) {
         videoRef.current.pause();
         videoRef.current.src = '';
       }
+      mediaBufferManager.revokeAll();
     };
   }, []);
 
   const lastErrorTimeRef = useRef<number>(0);
+  const fallbackAttemptRef = useRef<Record<string, number>>({});
+  const isScrubbingRef = useRef<boolean>(false);
+  const scrubDebounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Fast Stream URL Normalizer (Prefers in-memory Blob Object URL for 0ms scrub latency)
+  const getOptimizedMediaUrl = useCallback((url: string): string => {
+    if (!url) return '';
+    const cached = mediaBufferManager.getCachedBlobUrl(url);
+    if (cached) return cached;
+    return url;
+  }, []);
+
+  // Background buffer loader for active track
+  const startBackgroundBuffering = useCallback((track: MediaTrack) => {
+    if (!track.url || track.url.startsWith('blob:')) return;
+    mediaBufferManager
+      .loadAsBlobUrl(track.url, track.mimeType, (pct) => {
+        const targetDur = track.duration || duration || 10;
+        setBufferedEnd(Math.max(currentTime, (targetDur * pct) / 100));
+      })
+      .then((blobUrl) => {
+        if (blobUrl && blobUrl.startsWith('blob:')) {
+          addLog('info', 'cache', `Media fully buffered in memory: ${track.title}`);
+        }
+      })
+      .catch(() => {});
+  }, [currentTime, duration, addLog]);
 
   // 3. Media Player Controls Implementation (PlayerEngine interface)
   const playMedia = async () => {
     if (!videoRef.current) return;
+    const targetTrack = currentTrack || playlist[0] || DEFAULT_VLC_PLAYLIST[0];
     try {
-      const targetTrack = currentTrack || playlist[0] || DEFAULT_VLC_PLAYLIST[0];
-      const targetUrl = targetTrack.url;
+      const finalUrl = getOptimizedMediaUrl(targetTrack.url);
 
-      addLog('info', 'input', `Opening media stream: ${targetTrack.title} (${targetUrl})`);
-      addLog('debug', 'cache', `Network caching buffer initialized to ${preferences.networkCachingMs} ms`);
+      addLog('info', 'input', `Opening media stream: ${targetTrack.title}`);
+      addLog('debug', 'cache', `Network caching buffer target: ${preferences.networkCachingMs} ms`);
 
-      if (!videoRef.current.src || !videoRef.current.src.includes(targetUrl)) {
-        videoRef.current.src = targetUrl;
-        videoRef.current.load();
+      if (!videoRef.current.src || !videoRef.current.src.endsWith(finalUrl)) {
+        videoRef.current.src = finalUrl;
       }
-      setIsBuffering(true);
       await videoRef.current.play();
       setIsBuffering(false);
       setIsPlaying(true);
       setIsPaused(false);
       setStatusText(`Playing: ${targetTrack.title || 'Media'}`);
       showOsd('▶ Play');
-      addLog('info', 'decoder', `Playback started successfully. Resolution: ${videoRef.current.videoWidth || 'audio'}x${videoRef.current.videoHeight || 'audio'}`);
+      addLog('info', 'decoder', `Playback started instantly`);
+
+      // Trigger background memory caching for instant 20+ second seeking
+      startBackgroundBuffering(targetTrack);
     } catch (err: any) {
       setIsBuffering(false);
       setIsPlaying(false);
       setIsPaused(false);
-      handlePlaybackError(err, currentTrack?.url);
+
+      if (err?.name === 'NotAllowedError') {
+        setStatusText('Paused (Tap video to play)');
+        addLog('warn', 'input', 'Autoplay blocked by browser policy. User gesture required.');
+        return;
+      }
+
+      // Try automatic fallback to cached blob or direct url if proxy had an issue
+      const trackId = targetTrack.id;
+      const attempts = fallbackAttemptRef.current[trackId] || 0;
+      if (attempts === 0 && videoRef.current) {
+        fallbackAttemptRef.current[trackId] = 1;
+        const cachedBlob = mediaBufferManager.getCachedBlobUrl(targetTrack.url);
+        const fallbackUrl = cachedBlob || targetTrack.url;
+        addLog('warn', 'stream', `Retrying media load with fallback buffer: ${fallbackUrl}`);
+        videoRef.current.src = fallbackUrl;
+        videoRef.current
+          .play()
+          .then(() => {
+            setIsBuffering(false);
+            setIsPlaying(true);
+            setIsPaused(false);
+            setStatusText(`Playing: ${targetTrack.title}`);
+            showOsd(`▶ ${targetTrack.title}`);
+          })
+          .catch((fallbackErr) => {
+            handlePlaybackError(fallbackErr, targetTrack.url);
+          });
+        return;
+      }
+
+      handlePlaybackError(err, targetTrack.url);
     }
   };
 
@@ -354,6 +434,12 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
 
   const seekMedia = (seconds: number) => {
     if (!videoRef.current) return;
+    isScrubbingRef.current = true;
+    if (scrubDebounceRef.current) clearTimeout(scrubDebounceRef.current);
+    scrubDebounceRef.current = setTimeout(() => {
+      isScrubbingRef.current = false;
+    }, 500);
+
     if (preferences.fastSeekEnabled && typeof (videoRef.current as any).fastSeek === 'function') {
       try {
         (videoRef.current as any).fastSeek(seconds);
@@ -416,17 +502,15 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
     setRate(1.0);
   };
 
-  // 4. Playlist Navigation
+  // 4. Playlist Navigation (Instantaneous Track Switch)
   const playTrackAtIndex = (index: number) => {
     if (index < 0 || index >= playlist.length) return;
     setCurrentIndex(index);
     const track = playlist[index];
     if (videoRef.current && track?.url) {
+      const finalUrl = getOptimizedMediaUrl(track.url);
       addLog('info', 'playlist', `Loading track [${index + 1}/${playlist.length}]: ${track.title}`);
-      setIsBuffering(true);
-      videoRef.current.pause();
-      videoRef.current.src = track.url;
-      videoRef.current.load();
+      videoRef.current.src = finalUrl;
       videoRef.current
         .play()
         .then(() => {
@@ -436,34 +520,12 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
           setStatusText(`Playing: ${track.title}`);
           showOsd(`▶ ${track.title}`);
           addLog('info', 'decoder', `Playing ${track.title} successfully`);
+          startBackgroundBuffering(track);
         })
         .catch((err) => {
           setIsBuffering(false);
           setIsPlaying(false);
           setIsPaused(false);
-
-          // If external stream failed directly (e.g. CORS), try streaming through backend proxy
-          if (track.url.startsWith('http') && !track.url.includes('/api/stream') && videoRef.current) {
-            addLog('warn', 'network', `Direct stream blocked/failed for ${track.url}. Retrying via Cyber Café Stream Proxy...`);
-            const proxyUrl = `/api/stream?url=${encodeURIComponent(track.url)}`;
-            videoRef.current.src = proxyUrl;
-            videoRef.current.load();
-            videoRef.current
-              .play()
-              .then(() => {
-                setIsBuffering(false);
-                setIsPlaying(true);
-                setIsPaused(false);
-                setStatusText(`Playing: ${track.title} (Proxied)`);
-                showOsd(`▶ ${track.title}`);
-                addLog('info', 'stream_proxy', `Stream proxy connected successfully for ${track.title}`);
-              })
-              .catch((proxyErr) => {
-                handlePlaybackError(proxyErr, track.url);
-              });
-            return;
-          }
-
           handlePlaybackError(err, track.url);
         });
     }
@@ -521,14 +583,16 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
     }
   };
 
-  // 6. Network Stream Feature Implementation
+  // 6. Network Stream Feature Implementation (Instant Start)
   const handlePlayNetworkUrl = (url: string, title?: string) => {
+    const cleanPath = url.toLowerCase().split('?')[0];
     const isAudio =
-      url.endsWith('.mp3') ||
-      url.endsWith('.wav') ||
-      url.endsWith('.ogg') ||
-      url.endsWith('.aac') ||
-      url.includes('audio');
+      cleanPath.endsWith('.mp3') ||
+      cleanPath.endsWith('.wav') ||
+      cleanPath.endsWith('.ogg') ||
+      cleanPath.endsWith('.aac') ||
+      cleanPath.endsWith('.flac') ||
+      cleanPath.endsWith('.m4a');
 
     let hostName = 'stream';
     try {
@@ -544,18 +608,14 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
       url.split('/').pop()?.split('?')[0] ||
       `Network Stream (${hostName})`;
 
-    // If HTTP stream on HTTPS page, auto-route through server proxy
-    const finalUrl =
-      url.startsWith('http://') && typeof window !== 'undefined' && window.location.protocol === 'https:'
-        ? `/api/stream?url=${encodeURIComponent(url)}`
-        : url;
+    const finalUrl = getOptimizedMediaUrl(url);
 
-    addLog('info', 'input', `Adding network stream to playlist: ${cleanTitle}`);
+    addLog('info', 'input', `Adding network stream: ${cleanTitle}`);
 
     const newTrack: MediaTrack = {
       id: `stream_${Date.now()}`,
       title: cleanTitle,
-      url: finalUrl,
+      url: url,
       type: 'network',
       format: isAudio ? 'audio' : 'video',
       addedAt: Date.now(),
@@ -566,10 +626,7 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
     setCurrentIndex(0);
 
     if (videoRef.current) {
-      setIsBuffering(true);
-      videoRef.current.pause();
       videoRef.current.src = finalUrl;
-      videoRef.current.load();
       videoRef.current
         .play()
         .then(() => {
@@ -578,35 +635,12 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
           setIsPaused(false);
           setStatusText(`Playing: ${cleanTitle}`);
           showOsd(`▶ ${cleanTitle}`);
-          addLog('info', 'decoder', `Stream started: ${cleanTitle}`);
+          addLog('info', 'decoder', `Stream started instantly: ${cleanTitle}`);
         })
         .catch((err) => {
           setIsBuffering(false);
           setIsPlaying(false);
           setIsPaused(false);
-
-          // Retry via stream proxy if direct play failed
-          if (!finalUrl.includes('/api/stream') && finalUrl.startsWith('http') && videoRef.current) {
-            addLog('warn', 'network', `Direct load failed for ${url}. Attempting stream proxy...`);
-            const proxyUrl = `/api/stream?url=${encodeURIComponent(url)}`;
-            videoRef.current.src = proxyUrl;
-            videoRef.current.load();
-            videoRef.current
-              .play()
-              .then(() => {
-                setIsBuffering(false);
-                setIsPlaying(true);
-                setIsPaused(false);
-                setStatusText(`Playing: ${cleanTitle}`);
-                showOsd(`▶ ${cleanTitle}`);
-                addLog('info', 'stream_proxy', `Stream proxy connected successfully for ${cleanTitle}`);
-              })
-              .catch((proxyErr) => {
-                handlePlaybackError(proxyErr, url);
-              });
-            return;
-          }
-
           handlePlaybackError(err, url);
         });
     }
@@ -835,6 +869,7 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
 
       {/* 1. Classic VLC Menu Bar */}
       <VlcMenuBar
+        isVisible={areControlsVisible}
         onOpenFile={handleTriggerFileInput}
         onOpenNetworkStream={() => setIsNetworkModalOpen(true)}
         onOpenPlaylist={() => setIsPlaylistModalOpen(true)}
@@ -870,12 +905,30 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
           !areControlsVisible && isPlaying ? 'cursor-none' : 'cursor-pointer'
         }`}
         onClick={() => {
-          // Single click on video toggles play/pause like standard media players
-          togglePlay();
+          if (!areControlsVisible) {
+            resetControlsTimer();
+          } else {
+            togglePlay();
+          }
         }}
         onDoubleClick={(e) => {
           e.stopPropagation();
-          toggleFullscreen();
+          const rect = e.currentTarget.getBoundingClientRect();
+          const clickX = e.clientX - rect.left;
+          const ratio = clickX / rect.width;
+
+          if (ratio < 0.35) {
+            // Left 35%: Seek -10s
+            jumpBy(-10);
+            showSeekRipple('left', '⏪ 10s');
+          } else if (ratio > 0.65) {
+            // Right 35%: Seek +10s
+            jumpBy(10);
+            showSeekRipple('right', '10s ⏩');
+          } else {
+            // Center double click: Toggle Fullscreen
+            toggleFullscreen();
+          }
         }}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -889,14 +942,26 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
           }
         }}
       >
+        {/* Double-Tap / Double-Click Seek Animation Ripple */}
+        {seekRipple && (
+          <div
+            className={`absolute top-0 bottom-0 ${
+              seekRipple.side === 'left' ? 'left-0 rounded-r-full' : 'right-0 rounded-l-full'
+            } w-1/3 bg-white/20 flex items-center justify-center pointer-events-none z-30 animate-pulse`}
+          >
+            <div className="bg-black/80 text-white font-bold px-3 py-1.5 rounded-full border border-white/30 text-xs shadow-xl flex items-center gap-1 font-mono">
+              <span>{seekRipple.label}</span>
+            </div>
+          </div>
+        )}
         {/* Native HTML5 Video Element */}
         <video
           ref={videoRef}
           src={currentTrack?.url}
           playsInline
           preload="auto"
-          className={`w-full h-full ${
-            currentTrack?.format === 'audio' ? 'hidden' : 'block'
+          className={`w-full h-full object-contain ${
+            currentTrack?.format === 'audio' && videoDimensions.width === 0 ? 'hidden' : 'block'
           }`}
           style={getAspectRatioStyle()}
           onTimeUpdate={() => {
@@ -914,11 +979,17 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
           }}
           onLoadedMetadata={() => {
             if (videoRef.current) {
+              const hasVideo = videoRef.current.videoWidth > 0 && videoRef.current.videoHeight > 0;
               setDuration(videoRef.current.duration);
               setVideoDimensions({
                 width: videoRef.current.videoWidth,
                 height: videoRef.current.videoHeight,
               });
+              if (hasVideo && currentTrack?.format === 'audio') {
+                setPlaylist((prev) =>
+                  prev.map((t, i) => (i === currentIndex ? { ...t, format: 'video' } : t))
+                );
+              }
               addLog(
                 'info',
                 'decoder',
@@ -943,16 +1014,50 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
             nextTrack();
           }}
           onError={() => {
+            const mediaErr = videoRef.current?.error;
+            // Suppress error if seeking/scrubbing or if user aborted the stream
+            if (isScrubbingRef.current || mediaErr?.code === 1) {
+              return;
+            }
+
             setIsBuffering(false);
             setIsPlaying(false);
             setIsPaused(false);
-            const mediaErr = videoRef.current?.error;
+
+            const track = currentTrack;
+            const currentSrc = videoRef.current?.src || '';
+
+            if (track && videoRef.current) {
+              const attempts = fallbackAttemptRef.current[track.id] || 0;
+              if (attempts === 0) {
+                fallbackAttemptRef.current[track.id] = 1;
+                const cachedBlob = mediaBufferManager.getCachedBlobUrl(track.url);
+                if (cachedBlob && currentSrc !== cachedBlob) {
+                  addLog('warn', 'stream', `Direct stream error, switching to memory Blob buffer: ${track.url}`);
+                  videoRef.current.src = cachedBlob;
+                  videoRef.current.play().catch((e) => handlePlaybackError(e, track.url));
+                  return;
+                }
+                if (currentSrc.includes('/api/stream') || currentSrc.includes('/api/stream-proxy')) {
+                  addLog('warn', 'stream', `Proxy stream decoding error, retrying direct URL: ${track.url}`);
+                  videoRef.current.src = track.url;
+                  videoRef.current.play().catch((e) => handlePlaybackError(e, track.url));
+                  return;
+                } else if (track.url.startsWith('http')) {
+                  addLog('warn', 'stream', `Direct stream decoding error, retrying stream proxy: ${track.url}`);
+                  videoRef.current.src = `/api/stream?url=${encodeURIComponent(track.url)}`;
+                  videoRef.current.play().catch((e) => handlePlaybackError(e, track.url));
+                  return;
+                }
+              }
+            }
+
             let errMsg = 'Playback decoding failed';
             if (mediaErr) {
-              if (mediaErr.code === 1) errMsg = 'MEDIA_ERR_ABORTED: Playback aborted by user';
+              if (mediaErr.code === 1) return;
               else if (mediaErr.code === 2) errMsg = 'MEDIA_ERR_NETWORK: Network stream connection lost';
               else if (mediaErr.code === 3) errMsg = 'MEDIA_ERR_DECODE: Audio/Video codec decode error';
-              else if (mediaErr.code === 4) errMsg = 'MEDIA_ERR_SRC_NOT_SUPPORTED: Stream format not supported or blocked by CORS';
+              else if (mediaErr.code === 4) errMsg = 'MEDIA_ERR_SRC_NOT_SUPPORTED: Stream format not supported or host refused connection';
             }
             handlePlaybackError(new Error(errMsg), currentTrack?.url);
           }}
@@ -975,8 +1080,8 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
           </div>
         )}
 
-        {/* Audio Visualizer State: When an audio track is playing */}
-        {currentTrack?.format === 'audio' && (isPlaying || isPaused) && (
+        {/* Audio Visualizer State: Only when truly an audio-only stream with 0 video width */}
+        {currentTrack?.format === 'audio' && videoDimensions.width === 0 && (isPlaying || isPaused) && (
           <div className="flex flex-col items-center justify-center p-6 space-y-4 pointer-events-none select-none">
             <VlcConeIcon size={72} className={isPlaying ? 'animate-pulse' : 'opacity-70'} />
             <div className="text-center">
@@ -1136,6 +1241,8 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
         onStop={stopMedia}
         onPrevious={previousTrack}
         onNext={nextTrack}
+        onJumpBackward={() => jumpBy(-10)}
+        onJumpForward={() => jumpBy(10)}
         onSeek={seekMedia}
         onVolumeChange={setVolume}
         onToggleMute={toggleMute}
