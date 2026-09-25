@@ -26,13 +26,11 @@ async function startServer() {
     });
   };
 
-  // OpenRouter Open-Source Models Priority List (DeepSeek, Llama 3.3 70B, Mistral, Gemma)
+  // OpenRouter Open-Source Models Priority List (DeepSeek, Llama 3.3 70B, Mistral Small)
   const OPENROUTER_MODELS = [
     'deepseek/deepseek-chat',
     'meta-llama/llama-3.3-70b-instruct',
     'mistralai/mistral-small-24b-instruct-2501',
-    'google/gemma-2-9b-it',
-    'qwen/qwen-2.5-72b-instruct',
   ];
 
   // Universal AI generator helper with multi-tier OpenRouter + Gemini + Retro fallbacks
@@ -40,26 +38,22 @@ async function startServer() {
     persona,
     prompt,
     history = [],
-    userScreenName = 'Cabin 04 Friend',
   }: {
     persona: any;
     prompt: string;
     history?: Array<{ from: string; text: string }>;
-    userScreenName?: string;
   }): Promise<{ reply: string; provider: string; model?: string }> {
     const openRouterKey =
       process.env.OPENROUTER_API_KEY_CHAT ||
       process.env.OPENROUTER_AI_CHAT_FRIENDS ||
       process.env.OPENROUTER_API_KEY;
 
-    const userContextInfo = `The user chatting with you currently has the screen name "${userScreenName}".`;
-
     // 1. Try OpenRouter with smart open-source models
     if (openRouterKey) {
       const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
         {
           role: 'system',
-          content: `${persona.systemInstruction}\n\n${userContextInfo}\n\nIMPORTANT FORMATTING RULE: Keep replies concise (1 to 3 short sentences max) in true authentic 2004 AIM style. Use authentic 2004 internet slang, emoticons, and tone. Never talk like an AI assistant.`,
+          content: `${persona.systemInstruction}\n\nCRITICAL LANGUAGE ENFORCEMENT:\n- If the user writes in English, reply in 100% natural English. NEVER use Hindi or Hinglish words (do NOT say "yaar", "kya", "arre", "tum") when the user speaks in English!\n- ONLY speak in Hinglish if the user explicitly spoke to you in Hindi or Hinglish.\n- Keep replies concise (1 to 3 short sentences max) in true authentic 2004 AIM style. Use authentic 2004 internet slang, emoticons, and tone. Never talk like an AI assistant.`,
         },
       ];
 
@@ -200,8 +194,8 @@ async function startServer() {
   // API 1.5: AIM Persona Chat Endpoint powered by OpenRouter / Gemini AI
   app.post('/api/aim/chat', async (req, res) => {
     try {
-      const { buddy, message, history, userScreenName } = req.body;
-      const persona =
+      const { buddy, message, history } = req.body;
+      let persona =
         AIM_PERSONAS[buddy] ||
         Object.values(AIM_PERSONAS).find(
           (p) => p.screenName.toLowerCase() === (buddy || '').toLowerCase()
@@ -211,11 +205,23 @@ async function startServer() {
         return res.status(400).json({ error: 'Unknown AIM buddy' });
       }
 
+      // If Sarah, ensure it executes Bhavya's exact clone prompt pipeline
+      if (buddy === 'Xx_sarah_xX' || persona.screenName === 'Xx_sarah_xX') {
+        const bhavya = AIM_PERSONAS.xX_bhavya_core_Xx;
+        persona = {
+          ...bhavya,
+          screenName: 'Xx_sarah_xX',
+          displayName: 'Sarah',
+          systemInstruction: bhavya.systemInstruction
+            .replace(/xX_bhavya_core_Xx/g, 'Xx_sarah_xX')
+            .replace(/Bhavya/g, 'Sarah'),
+        };
+      }
+
       const result = await generateAiReply({
         persona,
         prompt: message || 'hey',
         history,
-        userScreenName,
       });
 
       return res.json({

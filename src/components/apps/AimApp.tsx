@@ -317,7 +317,7 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
       [selectedBuddy]: [...(prev[selectedBuddy] || []), newMsg],
     }));
 
-    // Realistic typing indicator delay (1.2s to 2.4s)
+    // Realistic typing indicator delay (while AI is thinking)
     setIsBuddyTyping(true);
 
     try {
@@ -330,7 +330,6 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
           buddy: selectedBuddy,
           message: textSent,
           history: historyContext,
-          userScreenName: myUsername,
         }),
       });
 
@@ -347,43 +346,39 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
         replyText = fallbacks[Math.floor(Math.random() * fallbacks.length)];
       }
 
-      // Simulate human response pause
-      setTimeout(() => {
-        setIsBuddyTyping(false);
-        playAimReceive();
+      setIsBuddyTyping(false);
+      playAimReceive();
 
-        const replyMsg: AimMessage = {
-          id: (Date.now() + 1).toString(),
-          from: selectedBuddy,
-          text: replyText,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        };
+      const replyMsg: AimMessage = {
+        id: (Date.now() + 1).toString(),
+        from: selectedBuddy,
+        text: replyText,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
 
-        setChatHistory((prev) => ({
-          ...prev,
-          [selectedBuddy]: [...(prev[selectedBuddy] || []), replyMsg],
-        }));
-      }, 1200 + Math.random() * 800);
-    } catch {
-      setTimeout(() => {
-        setIsBuddyTyping(false);
-        const persona = AIM_PERSONAS[selectedBuddy];
-        const fallbacks = persona?.sampleResponses || ['lol nice', 'brb', 'k'];
-        const fallbackReply = fallbacks[Math.floor(Math.random() * fallbacks.length)];
+      setChatHistory((prev) => ({
+        ...prev,
+        [selectedBuddy]: [...(prev[selectedBuddy] || []), replyMsg],
+      }));
+    } catch (fetchErr) {
+      console.error('AIM fetch error:', fetchErr);
+      setIsBuddyTyping(false);
+      const persona = AIM_PERSONAS[selectedBuddy];
+      const fallbacks = persona?.sampleResponses || ['lol nice', 'brb', 'k'];
+      const fallbackReply = fallbacks[Math.floor(Math.random() * fallbacks.length)];
 
-        playAimReceive();
-        const replyMsg: AimMessage = {
-          id: (Date.now() + 1).toString(),
-          from: selectedBuddy,
-          text: fallbackReply,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        };
+      playAimReceive();
+      const replyMsg: AimMessage = {
+        id: (Date.now() + 1).toString(),
+        from: selectedBuddy,
+        text: fallbackReply,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
 
-        setChatHistory((prev) => ({
-          ...prev,
-          [selectedBuddy]: [...(prev[selectedBuddy] || []), replyMsg],
-        }));
-      }, 1200);
+      setChatHistory((prev) => ({
+        ...prev,
+        [selectedBuddy]: [...(prev[selectedBuddy] || []), replyMsg],
+      }));
     }
   };
 
