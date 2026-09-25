@@ -7,6 +7,7 @@ interface ExportChatOptions {
   allChats?: Record<string, AimMessage[]>;
   buddies?: AimBuddy[];
   exportAll?: boolean;
+  myUserName?: string;
 }
 
 export function generateAimChatHtml({
@@ -15,6 +16,7 @@ export function generateAimChatHtml({
   allChats,
   buddies = [],
   exportAll = false,
+  myUserName = 'Guest_Cabin04',
 }: ExportChatOptions): string {
   const exportDate = new Date().toLocaleString();
   const persona = AIM_PERSONAS[buddyScreenName as keyof typeof AIM_PERSONAS];
@@ -44,7 +46,7 @@ export function generateAimChatHtml({
         }
 
         const isMe = msg.from === 'me';
-        const senderName = isMe ? 'Guest_Cabin04' : currentBuddy;
+        const senderName = isMe ? myUserName : currentBuddy;
         const senderClass = isMe ? 'sender-me' : 'sender-buddy';
 
         return `
@@ -60,12 +62,28 @@ export function generateAimChatHtml({
       .join('\n');
   };
 
-  const buddyListHtml =
-    exportAll && allChats
+  const buddyNames = exportAll
+    ? buddies.length > 0
+      ? buddies.map((b) => b.screenName)
+      : allChats
       ? Object.keys(allChats)
+      : []
+    : [];
+
+  const filteredAllChats: Record<string, AimMessage[]> = {};
+  if (exportAll && allChats) {
+    buddyNames.forEach((bName) => {
+      if (allChats[bName]) {
+        filteredAllChats[bName] = allChats[bName];
+      }
+    });
+  }
+
+  const buddyListHtml =
+    exportAll && buddyNames.length > 0
+      ? buddyNames
           .map((bName) => {
-            const count = allChats[bName]?.length || 0;
-            const bPersona = AIM_PERSONAS[bName as keyof typeof AIM_PERSONAS];
+            const count = allChats?.[bName]?.length || 0;
             return `
               <button class="buddy-tab ${bName === buddyScreenName ? 'active' : ''}" onclick="switchBuddy('${escapeHtml(bName)}')">
                 <span class="status-dot"></span>
@@ -77,7 +95,7 @@ export function generateAimChatHtml({
           .join('')
       : '';
 
-  const chatsDataJson = exportAll && allChats ? JSON.stringify(allChats) : '';
+  const chatsDataJson = exportAll ? JSON.stringify(filteredAllChats) : '';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -555,6 +573,7 @@ export function generateAimChatHtml({
 
   <script>
     const allChatsData = ${chatsDataJson || '{}'};
+    const currentMyUserName = "${escapeHtml(myUserName)}";
     let activeBuddy = "${escapeHtml(buddyScreenName)}";
 
     function filterMessages() {
@@ -611,7 +630,7 @@ export function generateAimChatHtml({
           html += '<div class="msg-buzz"><span class="buzz-icon">🔔</span><span class="buzz-text">' + escape(m.text) + '</span><span class="msg-time">' + escape(m.time) + '</span></div>';
         } else {
           const isMe = m.from === 'me';
-          const sender = isMe ? 'Guest_Cabin04' : buddyName;
+          const sender = isMe ? currentMyUserName : buddyName;
           const sClass = isMe ? 'sender-me' : 'sender-buddy';
           html += '<div class="msg-row"><div class="msg-header"><span class="msg-sender ' + sClass + '">' + escape(sender) + ':</span><span class="msg-time">' + escape(m.time) + '</span></div><div class="msg-body">' + escape(m.text) + '</div></div>';
         }

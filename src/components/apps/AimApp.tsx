@@ -22,6 +22,11 @@ const INITIAL_BUDDIES: AimBuddy[] = [
     statusMessage: AIM_PERSONAS.xX_bhavya_core_Xx.statusMessage,
   },
   {
+    screenName: 'Xx_sarah_xX',
+    status: 'online',
+    statusMessage: AIM_PERSONAS.Xx_sarah_xX.statusMessage,
+  },
+  {
     screenName: 'CyberCafeAdmin',
     status: 'online',
     statusMessage: AIM_PERSONAS.CyberCafeAdmin.statusMessage,
@@ -52,12 +57,18 @@ const STORAGE_AIM_CHATS_KEY = 'cyber_cafe_aim_chat_history_v1';
 const STORAGE_AIM_SELECTED_BUDDY_KEY = 'cyber_cafe_aim_selected_buddy_v1';
 const STORAGE_AIM_MY_STATUS_KEY = 'cyber_cafe_aim_my_status_v1';
 const STORAGE_AIM_CUSTOM_STATUS_MSG_KEY = 'cyber_cafe_aim_custom_status_msg_v1';
+const STORAGE_AIM_MY_USERNAME_KEY = 'cyber_cafe_aim_my_username_v1';
 
 const DEFAULT_INITIAL_CHAT_HISTORY: Record<string, AimMessage[]> = {
   xX_bhavya_core_Xx: [
     { id: '1', from: 'xX_bhavya_core_Xx', text: 'hey are you still at Cabin 04?', time: '10:42 PM' },
     { id: '2', from: 'me', text: 'yeah, listening to some songs on Winamp', time: '10:43 PM' },
     { id: '3', from: 'xX_bhavya_core_Xx', text: 'send me that Linkin park track if it finishes! ;)', time: '10:44 PM' },
+  ],
+  Xx_sarah_xX: [
+    { id: '1', from: 'Xx_sarah_xX', text: 'heyy are you still at Cabin 04?', time: '10:45 PM' },
+    { id: '2', from: 'me', text: 'yeah, listening to some songs on Winamp', time: '10:46 PM' },
+    { id: '3', from: 'Xx_sarah_xX', text: 'send me that Linkin park track if it finishes! ;)', time: '10:47 PM' },
   ],
   CyberCafeAdmin: [
     { id: '1', from: 'CyberCafeAdmin', text: 'Welcome to Cabin 04. Your terminal is active. Please let front desk know if you require laser printing or drinks.', time: '10:15 PM' },
@@ -70,20 +81,69 @@ const DEFAULT_INITIAL_CHAT_HISTORY: Record<string, AimMessage[]> = {
 export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
   const [buddies] = useState<AimBuddy[]>(INITIAL_BUDDIES);
 
-  // 1. Persistent selected buddy from browser cache
+  // 1. Persistent username/screen name from browser cache
+  const [myUsername, setMyUsername] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_AIM_MY_USERNAME_KEY);
+      if (saved && saved.trim()) return saved.trim();
+    } catch {
+      // ignore
+    }
+    return 'Guest_Cabin04';
+  });
+
+  const [isEditingUsername, setIsEditingUsername] = useState(false);
+  const [tempUsername, setTempUsername] = useState('');
+
+  // 2. Persistent selected buddy from browser cache
   const [selectedBuddy, setSelectedBuddy] = useState<string>(() => {
+    let initialUser = 'Guest_Cabin04';
+    try {
+      const savedUser = localStorage.getItem(STORAGE_AIM_MY_USERNAME_KEY);
+      if (savedUser && savedUser.trim()) initialUser = savedUser.trim();
+    } catch {
+      // ignore
+    }
+    const isAashankUser = initialUser === 'aashank';
+    const fallbackBuddy = isAashankUser ? 'xX_bhavya_core_Xx' : 'Xx_sarah_xX';
+
     try {
       const saved = localStorage.getItem(STORAGE_AIM_SELECTED_BUDDY_KEY);
       if (saved && INITIAL_BUDDIES.some((b) => b.screenName === saved)) {
+        if (saved === 'xX_bhavya_core_Xx' && !isAashankUser) return fallbackBuddy;
+        if (saved === 'Xx_sarah_xX' && isAashankUser) return fallbackBuddy;
         return saved;
       }
     } catch {
       // ignore
     }
-    return 'xX_bhavya_core_Xx';
+    return fallbackBuddy;
   });
 
-  // 2. Persistent status message from browser cache
+  // Strict case-sensitive check for "aashank"
+  const isAashank = myUsername === 'aashank';
+
+  // Mutual exclusion: only Bhavya is visible when username is "aashank", otherwise only Sarah is visible
+  const visibleBuddies = buddies.filter((b) => {
+    if (b.screenName === 'xX_bhavya_core_Xx') return isAashank;
+    if (b.screenName === 'Xx_sarah_xX') return !isAashank;
+    return true;
+  });
+
+  // Automatically switch selected buddy if current selection becomes hidden due to username change
+  useEffect(() => {
+    if (myUsername === 'aashank') {
+      if (selectedBuddy === 'Xx_sarah_xX') {
+        setSelectedBuddy('xX_bhavya_core_Xx');
+      }
+    } else {
+      if (selectedBuddy === 'xX_bhavya_core_Xx') {
+        setSelectedBuddy('Xx_sarah_xX');
+      }
+    }
+  }, [myUsername, selectedBuddy]);
+
+  // 3. Persistent status message from browser cache
   const [myStatusMessage, setMyStatusMessage] = useState<string>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_AIM_CUSTOM_STATUS_MSG_KEY);
@@ -94,7 +154,7 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
     return 'listening to music @ cabin 04';
   });
 
-  // 3. Persistent online/away status from browser cache
+  // 4. Persistent online/away status from browser cache
   const [myStatus, setMyStatus] = useState<'online' | 'away'>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_AIM_MY_STATUS_KEY);
@@ -112,14 +172,17 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
   const [tempStatusText, setTempStatusText] = useState('');
   const [exportNotice, setExportNotice] = useState<string | null>(null);
 
-  // 4. Persistent chat history from browser cache (retained across tabs, reloads, and visits)
+  // 5. Persistent chat history from browser cache (retained across tabs, reloads, and visits)
   const [chatHistory, setChatHistory] = useState<Record<string, AimMessage[]>>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_AIM_CHATS_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object') {
-          return parsed;
+          return {
+            ...DEFAULT_INITIAL_CHAT_HISTORY,
+            ...parsed,
+          };
         }
       }
     } catch (e) {
@@ -127,6 +190,17 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
     }
     return DEFAULT_INITIAL_CHAT_HISTORY;
   });
+
+  const saveUsername = () => {
+    const cleaned = tempUsername.trim().replace(/[^a-zA-Z0-9_-]/g, '');
+    if (cleaned) {
+      setMyUsername(cleaned);
+      playMouseClick();
+      setExportNotice(`Screen Name changed to "${cleaned}" (Saved)`);
+      setTimeout(() => setExportNotice(null), 3500);
+    }
+    setIsEditingUsername(false);
+  };
 
   // Export chat function
   const handleExportChat = (exportAll = false) => {
@@ -136,8 +210,9 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
       buddyScreenName: selectedBuddy,
       messages: currentMsgs,
       allChats: chatHistory,
-      buddies,
+      buddies: visibleBuddies,
       exportAll,
+      myUserName: myUsername,
     });
 
     const noticeText = exportAll
@@ -148,6 +223,15 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
       setExportNotice(null);
     }, 4000);
   };
+
+  // Automatically save username to browser cache
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_AIM_MY_USERNAME_KEY, myUsername);
+    } catch {
+      // ignore
+    }
+  }, [myUsername]);
 
   // Automatically save chat history to browser cache whenever messages update
   useEffect(() => {
@@ -378,7 +462,59 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
                 2004
               </span>
             </div>
-            <div className="text-[10px] text-[#444] font-mono">Screen Name: Guest_Cabin04</div>
+            {isEditingUsername ? (
+              <div className="flex items-center gap-1 mt-0.5">
+                <span className="text-[10px] text-[#444] font-mono">SN:</span>
+                <input
+                  type="text"
+                  value={tempUsername}
+                  autoFocus
+                  maxLength={24}
+                  onChange={(e) => setTempUsername(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      saveUsername();
+                    } else if (e.key === 'Escape') {
+                      setIsEditingUsername(false);
+                    }
+                  }}
+                  className="bg-white border border-[#7f9db9] px-1 py-0.5 text-[9.5px] font-mono rounded-xs outline-none w-28 text-black"
+                  placeholder="New Screen Name"
+                />
+                <button
+                  type="button"
+                  onClick={saveUsername}
+                  className="bg-[#002266] text-white px-1.5 py-0.5 text-[9px] font-bold rounded-xs cursor-pointer hover:bg-[#003399]"
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsEditingUsername(false)}
+                  className="bg-gray-200 text-gray-800 px-1 py-0.5 text-[9px] rounded-xs cursor-pointer hover:bg-gray-300"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="text-[10px] text-[#444] font-mono">
+                  Screen Name: <strong className="text-[#002266]">{myUsername}</strong>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTempUsername(myUsername);
+                    setIsEditingUsername(true);
+                  }}
+                  title="Rename your AIM Screen Name (Cached in browser)"
+                  className="text-[9px] bg-white/70 hover:bg-white text-[#002266] px-1 py-0.2 rounded border border-[#cca000] cursor-pointer font-bold flex items-center gap-0.5"
+                >
+                  <span>✏️</span>
+                  <span>Rename</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -412,14 +548,14 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
         {/* Buddy List Drawer */}
         <div className="w-[180px] bg-white border-r border-[#7f9db9] flex flex-col shrink-0 select-none">
           <div className="bg-[#f0ede0] px-2 py-1 border-b border-[#d4d0c8] font-bold text-[10.5px] text-[#003399] flex items-center justify-between">
-            <span>Buddies ({buddies.filter((b) => b.status === 'online').length} Online)</span>
+            <span>Buddies ({visibleBuddies.filter((b) => b.status === 'online').length} Online)</span>
           </div>
 
           <div className="flex-1 overflow-y-auto p-1 divide-y divide-gray-100">
             {/* Online Group */}
             <div className="py-1">
               <div className="text-[9.5px] font-bold text-gray-500 uppercase px-1 pb-1">Online</div>
-              {buddies
+              {visibleBuddies
                 .filter((b) => b.status === 'online')
                 .map((buddy) => (
                   <div
@@ -439,7 +575,7 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
                         <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
                         <span className="truncate">{buddy.screenName}</span>
                       </div>
-                      {buddy.screenName === 'xX_bhavya_core_Xx' && (
+                      {(buddy.screenName === 'xX_bhavya_core_Xx' || buddy.screenName === 'Xx_sarah_xX') && (
                         <span className="text-[9px] text-pink-300">💖</span>
                       )}
                       {buddy.screenName === 'CyberCafeAdmin' && (
@@ -460,7 +596,7 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
             {/* Away Group */}
             <div className="py-1">
               <div className="text-[9.5px] font-bold text-gray-500 uppercase px-1 pb-1">Away</div>
-              {buddies
+              {visibleBuddies
                 .filter((b) => b.status === 'away')
                 .map((buddy) => (
                   <div
@@ -654,7 +790,7 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
                 {!msg.isBuzz && (
                   <div className="font-bold">
                     <span className={msg.from === 'me' ? 'text-[#c00000]' : 'text-[#0000cc]'}>
-                      {msg.from === 'me' ? 'Guest_Cabin04' : msg.from}:
+                      {msg.from === 'me' ? myUsername : msg.from}:
                     </span>
                     <span className="text-[9px] text-gray-400 font-normal ml-1.5">{msg.time}</span>
                   </div>
@@ -686,7 +822,7 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
             <span className="border-l border-gray-300 h-3" />
             <span className="text-blue-600 cursor-pointer">A</span>
             <span className="text-red-600 cursor-pointer">Link</span>
-            <span className="text-gray-500 text-[9px] ml-auto">Direct Connection (Cabin 04)</span>
+            <span className="text-gray-500 text-[9px] ml-auto">Direct Connection ({myUsername})</span>
           </div>
 
           {/* Text Input Area & Send Button */}

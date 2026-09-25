@@ -197,7 +197,11 @@ async function startServer() {
   app.post('/api/aim/chat', async (req, res) => {
     try {
       const { buddy, message, history } = req.body;
-      const persona = AIM_PERSONAS[buddy];
+      const persona =
+        AIM_PERSONAS[buddy] ||
+        Object.values(AIM_PERSONAS).find(
+          (p) => p.screenName.toLowerCase() === (buddy || '').toLowerCase()
+        );
 
       if (!persona) {
         return res.status(400).json({ error: 'Unknown AIM buddy' });
