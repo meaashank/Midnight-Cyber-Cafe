@@ -195,12 +195,32 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
     const cleaned = tempUsername.trim().replace(/[^a-zA-Z0-9_-]/g, '');
     if (cleaned) {
       setMyUsername(cleaned);
+      try {
+        localStorage.setItem(STORAGE_AIM_MY_USERNAME_KEY, cleaned);
+        window.dispatchEvent(new CustomEvent('cybercafe_username_changed', { detail: cleaned }));
+      } catch {
+        // ignore
+      }
       playMouseClick();
       setExportNotice(`Screen Name changed to "${cleaned}" (Saved)`);
       setTimeout(() => setExportNotice(null), 3500);
     }
     setIsEditingUsername(false);
   };
+
+  // Sync real-time username updates from Windows XP Start Menu / User Accounts
+  useEffect(() => {
+    const handleUsernameChanged = (e: Event) => {
+      const customEvt = e as CustomEvent<string>;
+      if (customEvt.detail && typeof customEvt.detail === 'string' && customEvt.detail !== myUsername) {
+        setMyUsername(customEvt.detail);
+      }
+    };
+    window.addEventListener('cybercafe_username_changed', handleUsernameChanged);
+    return () => {
+      window.removeEventListener('cybercafe_username_changed', handleUsernameChanged);
+    };
+  }, [myUsername]);
 
   // Export chat function
   const handleExportChat = (exportAll = false) => {

@@ -45,6 +45,50 @@ export const Taskbar: React.FC<TaskbarProps> = ({
   const startMenuRef = useRef<HTMLDivElement>(null);
   const clockDialogRef = useRef<HTMLDivElement>(null);
 
+  // Synchronized system username with AIM and browser cache
+  const STORAGE_KEY = 'cyber_cafe_aim_my_username_v1';
+  const [username, setUsername] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved && saved.trim()) return saved.trim();
+    } catch {
+      // ignore
+    }
+    return 'Guest_Cabin04';
+  });
+
+  const [isUserAccountModalOpen, setIsUserAccountModalOpen] = useState(false);
+  const [newUsernameInput, setNewUsernameInput] = useState('');
+
+  // Keep username synced in real-time across components
+  useEffect(() => {
+    const handleUsernameChanged = (e: Event) => {
+      const customEvt = e as CustomEvent<string>;
+      if (customEvt.detail && typeof customEvt.detail === 'string' && customEvt.detail !== username) {
+        setUsername(customEvt.detail);
+      }
+    };
+    window.addEventListener('cybercafe_username_changed', handleUsernameChanged);
+    return () => {
+      window.removeEventListener('cybercafe_username_changed', handleUsernameChanged);
+    };
+  }, [username]);
+
+  const handleSaveUsername = () => {
+    const cleaned = newUsernameInput.trim().replace(/[^a-zA-Z0-9_-]/g, '');
+    if (cleaned) {
+      setUsername(cleaned);
+      try {
+        localStorage.setItem(STORAGE_KEY, cleaned);
+        window.dispatchEvent(new CustomEvent('cybercafe_username_changed', { detail: cleaned }));
+      } catch {
+        // ignore
+      }
+      playMouseClick();
+    }
+    setIsUserAccountModalOpen(false);
+  };
+
   useEffect(() => {
     const updateClock = () => {
       const now = new Date();
@@ -329,16 +373,39 @@ export const Taskbar: React.FC<TaskbarProps> = ({
           className="fixed bottom-[30px] left-0 w-[340px] z-50 rounded-t-md overflow-hidden shadow-[0_10px_30px_rgba(0,0,0,0.8)] border-2 border-[#0055ea] flex flex-col font-tahoma select-none"
         >
           {/* User Profile Header */}
-          <div className="h-[54px] bg-gradient-to-r from-[#0055ea] via-[#3593ff] to-[#0055ea] p-2.5 flex items-center gap-3 border-b border-[#0033aa]">
-            <div className="w-9 h-9 rounded-sm bg-white p-0.5 border border-white/80 shadow-md flex items-center justify-center text-xl">
-              🦆
-            </div>
-            <div>
-              <div className="text-white font-bold text-[13.5px] leading-tight" style={{ textShadow: '1px 1px 2px #000' }}>
-                Cabin 04 (Guest)
+          <div className="h-[58px] bg-gradient-to-r from-[#0055ea] via-[#3593ff] to-[#0055ea] p-2 flex items-center justify-between border-b border-[#0033aa]">
+            <div
+              className="flex items-center gap-2.5 cursor-pointer hover:brightness-105"
+              onClick={() => {
+                setNewUsernameInput(username);
+                setIsUserAccountModalOpen(true);
+              }}
+              title="Click to change account username"
+            >
+              <div className="w-10 h-10 rounded-sm bg-white p-0.5 border border-white/80 shadow-md flex items-center justify-center text-2xl">
+                🦆
               </div>
-              <div className="text-blue-100 text-[10px] font-mono">LAN ID: 192.168.1.104</div>
+              <div>
+                <div className="text-white font-bold text-[13px] leading-tight flex items-center gap-1" style={{ textShadow: '1px 1px 2px #000' }}>
+                  <span>{username === 'Guest_Cabin04' ? 'Cabin 04 (Guest)' : `Cabin 04 (${username})`}</span>
+                </div>
+                <div className="text-blue-100 text-[9.5px] font-mono">User: {username} · 192.168.1.104</div>
+              </div>
             </div>
+
+            {/* Prominent Change Username button */}
+            <button
+              type="button"
+              onClick={() => {
+                setNewUsernameInput(username);
+                setIsUserAccountModalOpen(true);
+              }}
+              title="Change user account name (e.g. set to 'aashank')"
+              className="px-2 py-1 bg-white/20 hover:bg-white text-white hover:text-[#002266] rounded border border-white/60 text-[10px] font-bold cursor-pointer transition-colors shadow-xs flex items-center gap-1 shrink-0"
+            >
+              <span>✏️</span>
+              <span>Change User</span>
+            </button>
           </div>
 
           {/* Split Two-Column Program Menu */}
@@ -535,11 +602,27 @@ export const Taskbar: React.FC<TaskbarProps> = ({
               </div>
 
               <div className="space-y-0.5 pt-2 border-t border-[#a0c4f2]">
-                <div className="flex items-center gap-2 p-1 hover:bg-[#316ac5] hover:text-white rounded-xs cursor-pointer">
+                <div
+                  onClick={() => {
+                    setIsStartOpen(false);
+                    setNewUsernameInput(username);
+                    setIsUserAccountModalOpen(true);
+                  }}
+                  className="flex items-center gap-2 p-1 hover:bg-[#316ac5] hover:text-white rounded-xs cursor-pointer"
+                  title="Open User Accounts to change username"
+                >
                   <Settings size={13} />
-                  <span>Control Panel</span>
+                  <span>Control Panel (User Accounts)</span>
                 </div>
-                <div className="flex items-center gap-2 p-1 hover:bg-[#316ac5] hover:text-white rounded-xs cursor-pointer">
+                <div
+                  onClick={() => {
+                    setIsStartOpen(false);
+                    setNewUsernameInput(username);
+                    setIsUserAccountModalOpen(true);
+                  }}
+                  className="flex items-center gap-2 p-1 hover:bg-[#316ac5] hover:text-white rounded-xs cursor-pointer"
+                  title="Run command or change user profile"
+                >
                   <PlaySquare size={13} />
                   <span>Run...</span>
                 </div>
@@ -572,6 +655,83 @@ export const Taskbar: React.FC<TaskbarProps> = ({
               <Power size={13} />
               <span>Turn Off Computer</span>
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Windows XP Authentic User Accounts Modal */}
+      {isUserAccountModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 font-tahoma text-[11px] select-none p-3">
+          <div className="w-[380px] bg-[#ece9d8] border-2 border-[#0055ea] rounded-t-sm shadow-[0_12px_36px_rgba(0,0,0,0.7)] overflow-hidden">
+            {/* Titlebar */}
+            <div className="bg-gradient-to-r from-[#0055ea] via-[#3593ff] to-[#0055ea] text-white px-2.5 py-1.5 flex items-center justify-between font-bold">
+              <div className="flex items-center gap-1.5">
+                <span>👤</span>
+                <span>User Accounts — Change User Name</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsUserAccountModalOpen(false)}
+                className="w-4 h-4 bg-[#d13438] hover:bg-[#e81123] text-white flex items-center justify-center rounded-xs text-[10px] font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-3.5 space-y-3 bg-[#ece9d8]">
+              <div className="flex items-start gap-3 bg-white p-2.5 border border-[#7f9db9] rounded-xs shadow-inner">
+                <div className="text-3xl p-1 bg-blue-100 rounded-sm">🦆</div>
+                <div>
+                  <div className="font-bold text-[#002266] text-xs">Cabin 04 Operator Account</div>
+                  <div className="text-gray-600 text-[10.5px]">
+                    Current Screen Name: <strong className="text-black font-mono">{username}</strong>
+                  </div>
+                  <div className="text-gray-500 text-[9.5px] mt-0.5">
+                    This updates your system user account and AIM Messenger screen name.
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-gray-800 mb-1">
+                  Type a new name for this user account:
+                </label>
+                <input
+                  type="text"
+                  value={newUsernameInput}
+                  autoFocus
+                  maxLength={24}
+                  onChange={(e) => setNewUsernameInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveUsername();
+                    else if (e.key === 'Escape') setIsUserAccountModalOpen(false);
+                  }}
+                  className="w-full bg-white border border-[#7f9db9] px-2 py-1 text-xs font-mono rounded-xs outline-none focus:border-[#0055ea] text-black"
+                  placeholder="e.g. aashank"
+                />
+                <div className="text-[9.5px] text-[#003399] mt-1 italic">
+                  Note: Name is case-sensitive (e.g. &quot;aashank&quot; unlocks Bhavya on AIM).
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-[#d4d0c8]">
+                <button
+                  type="button"
+                  onClick={handleSaveUsername}
+                  className="px-4 py-1 bg-[#002266] hover:bg-[#003399] active:bg-[#001144] text-white font-bold rounded-xs cursor-pointer shadow-xs text-[11px]"
+                >
+                  Change Name
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsUserAccountModalOpen(false)}
+                  className="px-3 py-1 bg-[#ece9d8] hover:bg-[#ded9c5] border border-[#7f9db9] text-[#111] rounded-xs cursor-pointer text-[11px]"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
