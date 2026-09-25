@@ -52,23 +52,14 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
     };
   });
 
-  // 2. Load persisted playlist or fallback to rich sample media
+  // 2. Fresh verified sample playlist on launch (never auto-load previously streamed network URLs)
   const [playlist, setPlaylist] = useState<MediaTrack[]>(() => {
     try {
       localStorage.removeItem('vlc_media_playlist_v1');
       localStorage.removeItem('vlc_media_playlist_v2');
-      const saved = localStorage.getItem(STORAGE_PLAYLIST_KEY);
-      if (saved) {
-        const parsed: MediaTrack[] = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const hasBrokenGoogleUrls = parsed.some(
-            (p) => !p.url || p.url.includes('commondatastorage.googleapis.com') || p.url.includes('undefined')
-          );
-          if (!hasBrokenGoogleUrls) {
-            return parsed;
-          }
-        }
-      }
+      localStorage.removeItem('vlc_media_playlist_v3');
+      localStorage.removeItem('vlc_media_playlist_v4');
+      localStorage.removeItem(STORAGE_PLAYLIST_KEY);
     } catch {
       // ignore
     }
@@ -242,20 +233,17 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
     }
   }, [preferences]);
 
-  // Persist playlist (exclude blob URLs that cannot survive page refresh)
+  // Clean up any stale saved playlists so previously streamed videos are never auto-loaded
   useEffect(() => {
     try {
-      const serializable = playlist.map((item) => {
-        if (item.url.startsWith('blob:')) {
-          return { ...item, url: '' }; // Cannot persist blob across sessions
-        }
-        return item;
-      });
-      localStorage.setItem(STORAGE_PLAYLIST_KEY, JSON.stringify(serializable));
+      localStorage.removeItem(STORAGE_PLAYLIST_KEY);
+      localStorage.removeItem('vlc_media_playlist_v1');
+      localStorage.removeItem('vlc_media_playlist_v2');
+      localStorage.removeItem('vlc_media_playlist_v3');
     } catch {
       // ignore
     }
-  }, [playlist]);
+  }, []);
 
   // Handle initialMediaUrl prop if provided from desktop / MyComputer
   useEffect(() => {
@@ -957,9 +945,9 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
         {/* Native HTML5 Video Element */}
         <video
           ref={videoRef}
-          src={currentTrack?.url}
+          src={isPlaying || isPaused || isBuffering ? currentTrack?.url : undefined}
           playsInline
-          preload="auto"
+          preload="none"
           className={`w-full h-full object-contain ${
             currentTrack?.format === 'audio' && videoDimensions.width === 0 ? 'hidden' : 'block'
           }`}
@@ -1015,8 +1003,8 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
           }}
           onError={() => {
             const mediaErr = videoRef.current?.error;
-            // Suppress error if seeking/scrubbing or if user aborted the stream
-            if (isScrubbingRef.current || mediaErr?.code === 1) {
+            // Suppress error if seeking/scrubbing, if user aborted, or if player is stopped/idle
+            if (isScrubbingRef.current || mediaErr?.code === 1 || (!isPlaying && !isPaused && !isBuffering)) {
               return;
             }
 

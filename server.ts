@@ -26,11 +26,12 @@ async function startServer() {
     });
   };
 
-  // OpenRouter Open-Source Models Priority List (DeepSeek, Llama 3.3 70B, Mistral Small)
+  // OpenRouter Open-Source Models Priority List (Rock-solid Llama 3.3 70B & 8B, Mistral, with DeepSeek fallback)
   const OPENROUTER_MODELS = [
-    'deepseek/deepseek-chat',
     'meta-llama/llama-3.3-70b-instruct',
+    'meta-llama/llama-3.1-8b-instruct',
     'mistralai/mistral-small-24b-instruct-2501',
+    'deepseek/deepseek-chat',
   ];
 
   // Universal AI generator helper with multi-tier OpenRouter + Gemini + Retro fallbacks
@@ -53,25 +54,33 @@ async function startServer() {
       const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
         {
           role: 'system',
-          content: `${persona.systemInstruction}\n\nCRITICAL LANGUAGE ENFORCEMENT:\n- If the user writes in English, reply in 100% natural English. NEVER use Hindi or Hinglish words (do NOT say "yaar", "kya", "arre", "tum") when the user speaks in English!\n- ONLY speak in Hinglish if the user explicitly spoke to you in Hindi or Hinglish.\n- Keep replies concise (1 to 3 short sentences max) in true authentic 2004 AIM style. Use authentic 2004 internet slang, emoticons, and tone. Never talk like an AI assistant.`,
+          content: `${persona.systemInstruction}\n\nCRITICAL LANGUAGE ENFORCEMENT:\n- If the user writes in English, reply in 100% natural English. NEVER use Hindi or Hinglish words (do NOT say "yaar", "kya", "arre", "tum") when the user speaks in English!\n- ONLY speak in Hinglish if the user explicitly spoke to you in Hindi or Hinglish.\n- Keep replies concise (1 to 2 short sentences max) in true authentic 2004 AIM style. Directly address and answer their questions or conversation topics! Never talk like an AI assistant.`,
         },
       ];
 
       if (Array.isArray(history)) {
         for (const item of history.slice(-6)) {
           if (item.text && item.from) {
-            messages.push({
-              role: item.from === 'me' ? 'user' : 'assistant',
-              content: item.text,
-            });
+            const role: 'user' | 'assistant' = item.from === 'me' ? 'user' : 'assistant';
+            const prevMsg = messages[messages.length - 1];
+            if (prevMsg && prevMsg.role === role) {
+              prevMsg.content += `\n${item.text}`;
+            } else {
+              messages.push({ role, content: item.text });
+            }
           }
         }
       }
 
-      messages.push({
-        role: 'user',
-        content: prompt || 'hey',
-      });
+      // Add user prompt, strictly keeping role alternation
+      const prevMsg = messages[messages.length - 1];
+      if (prevMsg && prevMsg.role === 'user') {
+        if (prevMsg.content.trim() !== (prompt || '').trim()) {
+          prevMsg.content += `\n${prompt || 'hey'}`;
+        }
+      } else {
+        messages.push({ role: 'user', content: prompt || 'hey' });
+      }
 
       for (const model of OPENROUTER_MODELS) {
         try {
@@ -87,8 +96,9 @@ async function startServer() {
               model,
               messages,
               max_tokens: 120,
-              temperature: 0.95,
+              temperature: 0.9,
             }),
+            signal: AbortSignal.timeout(4500),
           });
 
           if (res.ok) {
