@@ -215,19 +215,6 @@ async function startServer() {
         return res.status(400).json({ error: 'Unknown AIM buddy' });
       }
 
-      // If Sarah, ensure it executes Bhavya's exact clone prompt pipeline
-      if (buddy === 'Xx_sarah_xX' || persona.screenName === 'Xx_sarah_xX') {
-        const bhavya = AIM_PERSONAS.xX_bhavya_core_Xx;
-        persona = {
-          ...bhavya,
-          screenName: 'Xx_sarah_xX',
-          displayName: 'Sarah',
-          systemInstruction: bhavya.systemInstruction
-            .replace(/xX_bhavya_core_Xx/g, 'Xx_sarah_xX')
-            .replace(/Bhavya/g, 'Sarah'),
-        };
-      }
-
       const result = await generateAiReply({
         persona,
         prompt: message || 'hey',

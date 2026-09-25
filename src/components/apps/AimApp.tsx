@@ -104,14 +104,11 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
     } catch {
       // ignore
     }
-    const isAashankUser = initialUser === 'aashank';
-    const fallbackBuddy = isAashankUser ? 'xX_bhavya_core_Xx' : 'Xx_sarah_xX';
+    const fallbackBuddy = initialUser === 'aashank' ? 'xX_bhavya_core_Xx' : 'Xx_sarah_xX';
 
     try {
       const saved = localStorage.getItem(STORAGE_AIM_SELECTED_BUDDY_KEY);
       if (saved && INITIAL_BUDDIES.some((b) => b.screenName === saved)) {
-        if (saved === 'xX_bhavya_core_Xx' && !isAashankUser) return fallbackBuddy;
-        if (saved === 'Xx_sarah_xX' && isAashankUser) return fallbackBuddy;
         return saved;
       }
     } catch {
@@ -120,28 +117,8 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
     return fallbackBuddy;
   });
 
-  // Strict case-sensitive check for "aashank"
-  const isAashank = myUsername === 'aashank';
-
-  // Mutual exclusion: only Bhavya is visible when username is "aashank", otherwise only Sarah is visible
-  const visibleBuddies = buddies.filter((b) => {
-    if (b.screenName === 'xX_bhavya_core_Xx') return isAashank;
-    if (b.screenName === 'Xx_sarah_xX') return !isAashank;
-    return true;
-  });
-
-  // Automatically switch selected buddy if current selection becomes hidden due to username change
-  useEffect(() => {
-    if (myUsername === 'aashank') {
-      if (selectedBuddy === 'Xx_sarah_xX') {
-        setSelectedBuddy('xX_bhavya_core_Xx');
-      }
-    } else {
-      if (selectedBuddy === 'xX_bhavya_core_Xx') {
-        setSelectedBuddy('Xx_sarah_xX');
-      }
-    }
-  }, [myUsername, selectedBuddy]);
+  // Both Bhavya and Sarah are fully available and active with AI
+  const visibleBuddies = buddies;
 
   // 3. Persistent status message from browser cache
   const [myStatusMessage, setMyStatusMessage] = useState<string>(() => {
