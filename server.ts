@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { Readable, pipeline } from 'stream';
+import { spawn } from 'child_process';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import { AIM_PERSONAS } from './src/config/aimPersonas';
@@ -716,10 +717,21 @@ async function startServer() {
     }
   });
 
-  // API 6: Universal Media Stream Proxy for VLC media player (Instant Fast Stream)
+  // API 6: Universal Media Stream Proxy for VLC media player (Instant Fast Stream + Live Remuxer)
   app.get(['/api/stream', '/api/stream-proxy'], async (req, res) => {
     const controller = new AbortController();
-    req.on('close', () => controller.abort());
+    let ffmpegProc: any = null;
+
+    req.on('close', () => {
+      controller.abort();
+      if (ffmpegProc) {
+        try {
+          ffmpegProc.kill('SIGKILL');
+        } catch {
+          // ignore
+        }
+      }
+    });
 
     try {
       const targetUrl = (req.query.url as string || '').trim();
@@ -727,21 +739,28 @@ async function startServer() {
         return res.status(400).send('Missing url query parameter');
       }
 
+      // Check if URL is an explicit MKV, AVI, FLV, TS container
+      const lowerUrl = targetUrl.toLowerCase();
+      const isKnownNonBrowserContainer =
+        lowerUrl.includes('.mkv') ||
+        lowerUrl.includes('.avi') ||
+        lowerUrl.includes('.flv') ||
+        lowerUrl.includes('.ts') ||
+        lowerUrl.includes('.wmv');
+
       // Forward browser-like headers for maximum CDN / server compatibility
       const headers: Record<string, string> = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         Accept: '*/*',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Sec-Fetch-Dest': 'video',
-        'Sec-Fetch-Mode': 'no-cors',
-        'Sec-Fetch-Site': 'cross-site',
       };
       if (req.headers.range) {
         headers['Range'] = req.headers.range;
       }
 
-      // 15-second connect timeout
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      // 30-second connect timeout
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
 
       const response = await fetch(targetUrl, {
         headers,
@@ -754,10 +773,79 @@ async function startServer() {
         return res.status(response.status).send(`Upstream returned ${response.status}`);
       }
 
-      // Relay essential streaming headers
+      const rawContentType = (response.headers.get('content-type') || '').toLowerCase();
+      const contentDisposition = (response.headers.get('content-disposition') || '').toLowerCase();
+      const isMatroskaOrLegacy =
+        isKnownNonBrowserContainer ||
+        rawContentType.includes('mkv') ||
+        rawContentType.includes('matroska') ||
+        rawContentType.includes('msvideo') ||
+        rawContentType.includes('flv') ||
+        rawContentType.includes('mp2t') ||
+        contentDisposition.includes('.mkv') ||
+        contentDisposition.includes('.avi');
+
+      // If non-browser container, run on-the-fly FFmpeg fast stream copy to fragmented MP4
+      if (isMatroskaOrLegacy) {
+        res.setHeader('Content-Type', 'video/mp4');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', '*');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.status(200);
+        res.flushHeaders();
+
+        ffmpegProc = spawn('ffmpeg', [
+          '-headers',
+          'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36\r\n',
+          '-i',
+          targetUrl,
+          '-c:v',
+          'copy',
+          '-c:a',
+          'aac',
+          '-f',
+          'mp4',
+          '-movflags',
+          'frag_keyframe+empty_moov+default_base_moof',
+          'pipe:1',
+        ]);
+
+        ffmpegProc.stdout.pipe(res);
+
+        ffmpegProc.stderr.on('data', () => {
+          // background trace
+        });
+
+        ffmpegProc.on('error', (err: any) => {
+          if (!res.writableEnded) {
+            try {
+              res.end();
+            } catch {
+              // ignore
+            }
+          }
+        });
+
+        ffmpegProc.on('close', () => {
+          if (!res.writableEnded) {
+            try {
+              res.end();
+            } catch {
+              // ignore
+            }
+          }
+        });
+
+        return;
+      }
+
+      // Standard direct streaming for MP4, WebM, MP3, OGG, etc.
       const contentType = response.headers.get('content-type') || 'video/mp4';
       res.setHeader('Content-Type', contentType);
       res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', '*');
       res.setHeader('Accept-Ranges', 'bytes');
       res.setHeader('Cache-Control', 'public, max-age=86400');
 

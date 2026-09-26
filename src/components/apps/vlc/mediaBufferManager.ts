@@ -78,7 +78,15 @@ class MediaBufferManager {
 
     const loadPromise = (async () => {
       try {
-        const fetchUrl = url;
+        let fetchUrl = url;
+        if (
+          (url.startsWith('http://') || url.startsWith('https://')) &&
+          !url.startsWith(window.location.origin) &&
+          !url.startsWith('/api/')
+        ) {
+          fetchUrl = `/api/stream?url=${encodeURIComponent(url)}`;
+        }
+
         const response = await fetch(fetchUrl, {
           signal: controller.signal,
           headers: {

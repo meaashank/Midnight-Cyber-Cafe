@@ -304,11 +304,18 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
   const isScrubbingRef = useRef<boolean>(false);
   const scrubDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Fast Stream URL Normalizer (Prefers in-memory Blob Object URL for 0ms scrub latency)
+  // Fast Stream URL Normalizer (Prefers in-memory Blob Object URL for 0ms scrub latency, proxies external URLs)
   const getOptimizedMediaUrl = useCallback((url: string): string => {
     if (!url) return '';
     const cached = mediaBufferManager.getCachedBlobUrl(url);
     if (cached) return cached;
+    if (
+      (url.startsWith('http://') || url.startsWith('https://')) &&
+      !url.startsWith(window.location.origin) &&
+      !url.startsWith('/api/')
+    ) {
+      return `/api/stream?url=${encodeURIComponent(url)}`;
+    }
     return url;
   }, []);
 
@@ -498,32 +505,55 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
     if (videoRef.current && track?.url) {
       const finalUrl = getOptimizedMediaUrl(track.url);
       addLog('info', 'playlist', `Loading track [${index + 1}/${playlist.length}]: ${track.title}`);
-      videoRef.current.src = finalUrl;
-      videoRef.current.load();
-      videoRef.current
-        .play()
-        .then(() => {
-          setIsBuffering(false);
-          setIsPlaying(true);
-          setIsPaused(false);
-          setStatusText(`Playing: ${track.title}`);
-          showOsd(`▶ ${track.title}`);
-          addLog('info', 'decoder', `Playing ${track.title} successfully`);
-          startBackgroundBuffering(track);
-        })
-        .catch((err) => {
-          if (err?.name === 'AbortError' || err?.name === 'NotAllowedError' || err?.message?.includes('interrupted')) {
+      
+      const video = videoRef.current;
+      setIsBuffering(true);
+      setStatusText(`Opening: ${track.title}...`);
+      video.src = finalUrl;
+
+      const attemptPlay = () => {
+        video
+          .play()
+          .then(() => {
             setIsBuffering(false);
-            setIsPlaying(false);
-            setIsPaused(true);
-            setStatusText(`Ready: ${track.title} (Press Play)`);
-          } else {
-            setIsBuffering(false);
-            setIsPlaying(false);
+            setIsPlaying(true);
             setIsPaused(false);
-            handlePlaybackError(err, track.url);
-          }
-        });
+            setStatusText(`Playing: ${track.title}`);
+            showOsd(`▶ ${track.title}`);
+            addLog('info', 'decoder', `Playing ${track.title} successfully`);
+            startBackgroundBuffering(track);
+          })
+          .catch((err) => {
+            if (err?.name === 'NotAllowedError') {
+              // Muted autoplay fallback
+              video.muted = true;
+              video.play().then(() => {
+                setIsBuffering(false);
+                setIsPlaying(true);
+                setIsPaused(false);
+                setStatusText(`Playing: ${track.title} (Muted)`);
+              }).catch(() => {
+                setIsBuffering(false);
+                setIsPlaying(false);
+                setIsPaused(true);
+                setStatusText(`Ready: ${track.title} (Press Play)`);
+              });
+            } else if (err?.name === 'AbortError') {
+              const onCanPlay = () => {
+                video.removeEventListener('canplay', onCanPlay);
+                attemptPlay();
+              };
+              video.addEventListener('canplay', onCanPlay, { once: true });
+            } else {
+              setIsBuffering(false);
+              setIsPlaying(false);
+              setIsPaused(false);
+              handlePlaybackError(err, track.url);
+            }
+          });
+      };
+
+      attemptPlay();
     }
   };
 
@@ -584,6 +614,30 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
       return;
     }
 
+    const timestamp = new Date().toLocaleTimeString();
+    const mediaErr = videoRef.current?.error;
+    let errCodeName = 'UNKNOWN_MEDIA_ERROR';
+    if (mediaErr) {
+      if (mediaErr.code === 1) errCodeName = 'MEDIA_ERR_ABORTED (code 1)';
+      else if (mediaErr.code === 2) errCodeName = 'MEDIA_ERR_NETWORK (code 2)';
+      else if (mediaErr.code === 3) errCodeName = 'MEDIA_ERR_DECODE (code 3)';
+      else if (mediaErr.code === 4) errCodeName = 'MEDIA_ERR_SRC_NOT_SUPPORTED (code 4)';
+    }
+
+    const fullDiagnosticText = `[ERROR DETAILS]
+Timestamp: ${timestamp}
+Reason: ${cleanMsg}
+Media Code: ${errCodeName}
+Target URL: ${url}
+Active Pipeline: ${url.startsWith('http') ? `/api/stream?url=${encodeURIComponent(url)}` : 'Direct Source'}
+Network Caching: ${preferences.networkCachingMs} ms
+Buffer Engine: WebAudio/HTML5 Demuxer
+
+[SUBSYSTEM TRACE]
+• Stream Demuxer: Input stream returned non-200 or unparsable container.
+• Decoder: No hardware/software decoder found for container or CORS denied.
+• Network: If this is a third-party stream, ensure the server permits CORS or provides direct streamable audio/video bytes.`;
+
     addLog('error', 'decoder', `Stream connection failed: ${cleanMsg} (URL: ${url})`);
     setStatusText(`Error: Could not open media`);
 
@@ -591,8 +645,11 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
       setErrorModalData({
         title: 'VLC (v0.8.6) - Stream Connection Error',
         message: 'VLC could not decode this media stream or the remote host refused connection.',
-        details: `${cleanMsg}\n\nTarget Stream: ${url}\nNetwork Caching: ${preferences.networkCachingMs} ms`,
+        details: fullDiagnosticText,
         url,
+        errorCode: mediaErr?.code || 'ERR_STREAM_FAILED',
+        errorName: errCodeName,
+        timestamp,
       });
     }
   };
@@ -640,33 +697,54 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
     setCurrentIndex(0);
 
     if (videoRef.current) {
-      videoRef.current.src = finalUrl;
-      videoRef.current.load();
-      videoRef.current
-        .play()
-        .then(() => {
-          setIsBuffering(false);
-          setIsPlaying(true);
-          setIsPaused(false);
-          setStatusText(`Playing: ${cleanTitle}`);
-          showOsd(`▶ ${cleanTitle}`);
-          addLog('info', 'decoder', `Stream started: ${cleanTitle}`);
-          startBackgroundBuffering(newTrack);
-        })
-        .catch((err) => {
-          if (err?.name === 'AbortError' || err?.name === 'NotAllowedError' || err?.message?.includes('interrupted')) {
+      const video = videoRef.current;
+      setIsBuffering(true);
+      setStatusText(`Opening: ${cleanTitle}...`);
+      video.src = finalUrl;
+
+      const attemptPlay = () => {
+        video
+          .play()
+          .then(() => {
             setIsBuffering(false);
-            setIsPlaying(false);
-            setIsPaused(true);
-            setStatusText(`Ready: ${cleanTitle} (Press Play)`);
-            addLog('warn', 'input', `Stream ready. User click required.`);
-          } else {
-            setIsBuffering(false);
-            setIsPlaying(false);
+            setIsPlaying(true);
             setIsPaused(false);
-            handlePlaybackError(err, url);
-          }
-        });
+            setStatusText(`Playing: ${cleanTitle}`);
+            showOsd(`▶ ${cleanTitle}`);
+            addLog('info', 'decoder', `Stream started: ${cleanTitle}`);
+            startBackgroundBuffering(newTrack);
+          })
+          .catch((err) => {
+            if (err?.name === 'NotAllowedError') {
+              // Muted autoplay fallback
+              video.muted = true;
+              video.play().then(() => {
+                setIsBuffering(false);
+                setIsPlaying(true);
+                setIsPaused(false);
+                setStatusText(`Playing: ${cleanTitle} (Muted)`);
+              }).catch(() => {
+                setIsBuffering(false);
+                setIsPlaying(false);
+                setIsPaused(true);
+                setStatusText(`Ready: ${cleanTitle} (Press Play)`);
+              });
+            } else if (err?.name === 'AbortError') {
+              const onCanPlay = () => {
+                video.removeEventListener('canplay', onCanPlay);
+                attemptPlay();
+              };
+              video.addEventListener('canplay', onCanPlay, { once: true });
+            } else {
+              setIsBuffering(false);
+              setIsPlaying(false);
+              setIsPaused(false);
+              handlePlaybackError(err, url);
+            }
+          });
+      };
+
+      attemptPlay();
     }
   };
 
@@ -981,9 +1059,9 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
         {/* Native HTML5 Video Element */}
         <video
           ref={videoRef}
-          src={isPlaying || isPaused || isBuffering ? currentTrack?.url : undefined}
+          src={isPlaying || isPaused || isBuffering && currentTrack?.url ? getOptimizedMediaUrl(currentTrack.url) : undefined}
           playsInline
-          preload="none"
+          preload="auto"
           className={`w-full h-full object-contain ${
             currentTrack?.format === 'audio' && videoDimensions.width === 0 ? 'hidden' : 'block'
           }`}
@@ -1063,12 +1141,12 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
                   return;
                 }
                 if (currentSrc.includes('/api/stream') || currentSrc.includes('/api/stream-proxy')) {
-                  addLog('warn', 'stream', `Proxy stream decoding error, retrying direct URL: ${track.url}`);
-                  videoRef.current.src = track.url;
+                  addLog('warn', 'stream', `Proxy stream buffering, reconnecting: ${track.url}`);
+                  videoRef.current.src = `/api/stream?url=${encodeURIComponent(track.url)}&t=${Date.now()}`;
                   videoRef.current.play().catch((e) => handlePlaybackError(e, track.url));
                   return;
                 } else if (track.url.startsWith('http')) {
-                  addLog('warn', 'stream', `Direct stream decoding error, retrying stream proxy: ${track.url}`);
+                  addLog('warn', 'stream', `Direct stream error, routing through media proxy: ${track.url}`);
                   videoRef.current.src = `/api/stream?url=${encodeURIComponent(track.url)}`;
                   videoRef.current.play().catch((e) => handlePlaybackError(e, track.url));
                   return;
@@ -1366,6 +1444,10 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
       <VlcErrorDialog
         error={errorModalData}
         onClose={() => setErrorModalData(null)}
+        onOpenMessages={() => {
+          setErrorModalData(null);
+          setIsMessagesModalOpen(true);
+        }}
         onPlayDemo={() => {
           setErrorModalData(null);
           playTrackAtIndex(0);
