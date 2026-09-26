@@ -104,11 +104,14 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
     } catch {
       // ignore
     }
-    const fallbackBuddy = initialUser === 'aashank' ? 'xX_bhavya_core_Xx' : 'Xx_sarah_xX';
+    const isAashankUser = initialUser.trim() === 'aashank';
+    const fallbackBuddy = isAashankUser ? 'xX_bhavya_core_Xx' : 'Xx_sarah_xX';
 
     try {
       const saved = localStorage.getItem(STORAGE_AIM_SELECTED_BUDDY_KEY);
       if (saved && INITIAL_BUDDIES.some((b) => b.screenName === saved)) {
+        if (saved === 'xX_bhavya_core_Xx' && !isAashankUser) return fallbackBuddy;
+        if (saved === 'Xx_sarah_xX' && isAashankUser) return fallbackBuddy;
         return saved;
       }
     } catch {
@@ -117,8 +120,28 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
     return fallbackBuddy;
   });
 
-  // Both Bhavya and Sarah are fully available and active with AI
-  const visibleBuddies = buddies;
+  // Strict case-sensitive check: MUST be exactly lowercase "aashank"
+  const isAashank = myUsername.trim() === 'aashank';
+
+  // Mutual exclusion: only Bhavya is visible when username is strictly "aashank", otherwise only Sarah is visible
+  const visibleBuddies = buddies.filter((b) => {
+    if (b.screenName === 'xX_bhavya_core_Xx') return isAashank;
+    if (b.screenName === 'Xx_sarah_xX') return !isAashank;
+    return true;
+  });
+
+  // Automatically switch selected buddy if current selection becomes hidden due to username change
+  useEffect(() => {
+    if (isAashank) {
+      if (selectedBuddy === 'Xx_sarah_xX') {
+        setSelectedBuddy('xX_bhavya_core_Xx');
+      }
+    } else {
+      if (selectedBuddy === 'xX_bhavya_core_Xx') {
+        setSelectedBuddy('Xx_sarah_xX');
+      }
+    }
+  }, [isAashank, selectedBuddy]);
 
   // 3. Persistent status message from browser cache
   const [myStatusMessage, setMyStatusMessage] = useState<string>(() => {
@@ -399,37 +422,33 @@ export const AimApp: React.FC<AimAppProps> = ({ onTriggerBuzz }) => {
         reactionText = buzzFallbacks[Math.floor(Math.random() * buzzFallbacks.length)];
       }
 
-      setTimeout(() => {
-        setIsBuddyTyping(false);
-        playAimReceive();
-        const reaction: AimMessage = {
-          id: (Date.now() + 1).toString(),
-          from: selectedBuddy,
-          text: reactionText,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        };
-        setChatHistory((prev) => ({
-          ...prev,
-          [selectedBuddy]: [...(prev[selectedBuddy] || []), reaction],
-        }));
-      }, 1400);
+      setIsBuddyTyping(false);
+      playAimReceive();
+      const reaction: AimMessage = {
+        id: (Date.now() + 1).toString(),
+        from: selectedBuddy,
+        text: reactionText,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      setChatHistory((prev) => ({
+        ...prev,
+        [selectedBuddy]: [...(prev[selectedBuddy] || []), reaction],
+      }));
     } catch {
-      setTimeout(() => {
-        setIsBuddyTyping(false);
-        playAimReceive();
-        const persona = AIM_PERSONAS[selectedBuddy];
-        const reactionText = persona?.buzzResponses?.[0] || 'whoa why did you buzz me haha!';
-        const reaction: AimMessage = {
-          id: (Date.now() + 1).toString(),
-          from: selectedBuddy,
-          text: reactionText,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        };
-        setChatHistory((prev) => ({
-          ...prev,
-          [selectedBuddy]: [...(prev[selectedBuddy] || []), reaction],
-        }));
-      }, 1400);
+      setIsBuddyTyping(false);
+      playAimReceive();
+      const persona = AIM_PERSONAS[selectedBuddy];
+      const reactionText = persona?.buzzResponses?.[0] || 'whoa why did you buzz me haha!';
+      const reaction: AimMessage = {
+        id: (Date.now() + 1).toString(),
+        from: selectedBuddy,
+        text: reactionText,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      setChatHistory((prev) => ({
+        ...prev,
+        [selectedBuddy]: [...(prev[selectedBuddy] || []), reaction],
+      }));
     }
   };
 

@@ -24,16 +24,16 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onBootComplete }) => {
       setBootPhase('xp_boot');
     }, 1800);
 
-    // 3. Windows XP Startup Chime & Welcome
+    // 3. Windows XP Welcome Screen
     setTimeout(() => {
       setBootPhase('welcome');
-      playWindowsStartup();
-    }, 3800);
+    }, 3600);
 
-    // 4. Reveal Desktop
+    // 4. Reveal Desktop & Play Authentic Windows XP Startup Sound
     setTimeout(() => {
       onBootComplete();
-    }, 5600);
+      playWindowsStartup();
+    }, 5000);
   };
 
   // Listen for Enter key to start

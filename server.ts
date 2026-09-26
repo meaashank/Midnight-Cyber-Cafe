@@ -26,12 +26,12 @@ async function startServer() {
     });
   };
 
-  // OpenRouter Open-Source Models Priority List (Rock-solid Llama 3.3 70B & 8B, Mistral, with DeepSeek fallback)
+  // OpenRouter Open-Source Models Priority List (Ultra-fast Llama 3.1 8B, Llama 3.3 70B, Mistral Small)
   const OPENROUTER_MODELS = [
-    'meta-llama/llama-3.3-70b-instruct',
     'meta-llama/llama-3.1-8b-instruct',
+    'meta-llama/llama-3.3-70b-instruct',
     'mistralai/mistral-small-24b-instruct-2501',
-    'deepseek/deepseek-chat',
+    'google/gemini-2.0-flash-001',
   ];
 
   // Universal AI generator helper with multi-tier OpenRouter + Gemini + Retro fallbacks
@@ -49,7 +49,7 @@ async function startServer() {
       process.env.OPENROUTER_AI_CHAT_FRIENDS ||
       process.env.OPENROUTER_API_KEY;
 
-    // 1. Try OpenRouter with smart open-source models
+    // 1. Try OpenRouter with fast open-source models
     if (openRouterKey) {
       const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
         {
@@ -95,10 +95,10 @@ async function startServer() {
             body: JSON.stringify({
               model,
               messages,
-              max_tokens: 120,
-              temperature: 0.9,
+              max_tokens: 80,
+              temperature: 0.85,
             }),
-            signal: AbortSignal.timeout(4500),
+            signal: AbortSignal.timeout(2200),
           });
 
           if (res.ok) {
@@ -143,22 +143,22 @@ async function startServer() {
         let aiResponse;
         try {
           aiResponse = await ai.models.generateContent({
-            model: 'gemini-3.8-flash',
+            model: 'gemini-2.5-flash',
             contents,
             config: {
               systemInstruction: persona.systemInstruction,
-              temperature: 0.95,
-              topP: 0.95,
+              temperature: 0.9,
+              topP: 0.9,
             },
           });
         } catch {
           aiResponse = await ai.models.generateContent({
-            model: 'gemini-3.1-flash-lite',
+            model: 'gemini-2.5-flash-lite',
             contents,
             config: {
               systemInstruction: persona.systemInstruction,
-              temperature: 0.95,
-              topP: 0.95,
+              temperature: 0.9,
+              topP: 0.9,
             },
           });
         }

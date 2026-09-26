@@ -499,6 +499,7 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
       const finalUrl = getOptimizedMediaUrl(track.url);
       addLog('info', 'playlist', `Loading track [${index + 1}/${playlist.length}]: ${track.title}`);
       videoRef.current.src = finalUrl;
+      videoRef.current.load();
       videoRef.current
         .play()
         .then(() => {
@@ -511,10 +512,17 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
           startBackgroundBuffering(track);
         })
         .catch((err) => {
-          setIsBuffering(false);
-          setIsPlaying(false);
-          setIsPaused(false);
-          handlePlaybackError(err, track.url);
+          if (err?.name === 'AbortError' || err?.name === 'NotAllowedError' || err?.message?.includes('interrupted')) {
+            setIsBuffering(false);
+            setIsPlaying(false);
+            setIsPaused(true);
+            setStatusText(`Ready: ${track.title} (Press Play)`);
+          } else {
+            setIsBuffering(false);
+            setIsPlaying(false);
+            setIsPaused(false);
+            handlePlaybackError(err, track.url);
+          }
         });
     }
   };
@@ -557,6 +565,24 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
     const rawMsg = err?.message || 'Media decode failure or network stream unreachable.';
     const url = failedUrl || currentTrack?.url || 'media';
     const cleanMsg = rawMsg.includes('play()') ? 'Playback was interrupted or requires user permission.' : rawMsg;
+
+    // Check if this is an expected browser lifecycle interruption (user gesture / abort during rapid src switch)
+    const isAbortOrGesture =
+      err?.name === 'AbortError' ||
+      err?.name === 'NotAllowedError' ||
+      rawMsg.toLowerCase().includes('interrupted') ||
+      rawMsg.toLowerCase().includes('user permission') ||
+      rawMsg.toLowerCase().includes('gesture') ||
+      rawMsg.toLowerCase().includes('abort');
+
+    if (isAbortOrGesture) {
+      addLog('warn', 'input', `Stream ready / pending user playback: ${cleanMsg}`);
+      setIsBuffering(false);
+      setIsPlaying(false);
+      setIsPaused(true);
+      setStatusText('Ready (Click Play to start)');
+      return;
+    }
 
     addLog('error', 'decoder', `Stream connection failed: ${cleanMsg} (URL: ${url})`);
     setStatusText(`Error: Could not open media`);
@@ -615,6 +641,7 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
 
     if (videoRef.current) {
       videoRef.current.src = finalUrl;
+      videoRef.current.load();
       videoRef.current
         .play()
         .then(() => {
@@ -623,13 +650,22 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
           setIsPaused(false);
           setStatusText(`Playing: ${cleanTitle}`);
           showOsd(`▶ ${cleanTitle}`);
-          addLog('info', 'decoder', `Stream started instantly: ${cleanTitle}`);
+          addLog('info', 'decoder', `Stream started: ${cleanTitle}`);
+          startBackgroundBuffering(newTrack);
         })
         .catch((err) => {
-          setIsBuffering(false);
-          setIsPlaying(false);
-          setIsPaused(false);
-          handlePlaybackError(err, url);
+          if (err?.name === 'AbortError' || err?.name === 'NotAllowedError' || err?.message?.includes('interrupted')) {
+            setIsBuffering(false);
+            setIsPlaying(false);
+            setIsPaused(true);
+            setStatusText(`Ready: ${cleanTitle} (Press Play)`);
+            addLog('warn', 'input', `Stream ready. User click required.`);
+          } else {
+            setIsBuffering(false);
+            setIsPlaying(false);
+            setIsPaused(false);
+            handlePlaybackError(err, url);
+          }
         });
     }
   };
