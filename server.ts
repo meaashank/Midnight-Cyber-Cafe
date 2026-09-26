@@ -26,7 +26,7 @@ async function startServer() {
     });
   };
 
-  // OpenRouter Open-Source Models Priority List (Ultra-fast Llama 3.1 8B, Llama 3.3 70B, Mistral Small)
+  // OpenRouter Open-Source Models Priority List (Ultra-fast Llama 3.1 8B, Llama 3.3 70B, Mistral Small, Gemini Flash)
   const OPENROUTER_MODELS = [
     'meta-llama/llama-3.1-8b-instruct',
     'meta-llama/llama-3.3-70b-instruct',
@@ -49,27 +49,41 @@ async function startServer() {
       process.env.OPENROUTER_AI_CHAT_FRIENDS ||
       process.env.OPENROUTER_API_KEY;
 
+    // Format clean alternating history (user -> assistant/model -> user -> ...)
+    const sanitizedHistory: Array<{ role: 'user' | 'assistant'; text: string }> = [];
+    if (Array.isArray(history) && history.length > 0) {
+      for (const item of history.slice(-8)) {
+        if (!item?.text) continue;
+        const role: 'user' | 'assistant' = item.from === 'me' ? 'user' : 'assistant';
+        const last = sanitizedHistory[sanitizedHistory.length - 1];
+        if (last && last.role === role) {
+          last.text += `\n${item.text}`;
+        } else {
+          sanitizedHistory.push({ role, text: item.text });
+        }
+      }
+    }
+
+    // Ensure the conversation starts with 'user'
+    while (sanitizedHistory.length > 0 && sanitizedHistory[0].role === 'assistant') {
+      sanitizedHistory.shift();
+    }
+
     // 1. Try OpenRouter with fast open-source models
     if (openRouterKey) {
       const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
         {
           role: 'system',
-          content: `${persona.systemInstruction}\n\nCRITICAL LANGUAGE ENFORCEMENT:\n- If the user writes in English, reply in 100% natural English. NEVER use Hindi or Hinglish words (do NOT say "yaar", "kya", "arre", "tum") when the user speaks in English!\n- ONLY speak in Hinglish if the user explicitly spoke to you in Hindi or Hinglish.\n- Keep replies concise (1 to 2 short sentences max) in true authentic 2004 AIM style. Directly address and answer their questions or conversation topics! Never talk like an AI assistant.`,
+          content: `${persona.systemInstruction}\n\nCRITICAL CONVERSATION & LANGUAGE RULES:
+- Always DIRECTLY read and respond to what the user said in their latest message! Never ignore their questions or comments.
+- If the user writes in English, reply in 100% natural 2004 English.
+- If the user writes in Hindi or Hinglish, mirror them in Hinglish.
+- Keep replies punchy, authentic (1 to 2 short sentences max) in true 2004 AIM style. Never talk like an AI bot.`,
         },
       ];
 
-      if (Array.isArray(history)) {
-        for (const item of history.slice(-6)) {
-          if (item.text && item.from) {
-            const role: 'user' | 'assistant' = item.from === 'me' ? 'user' : 'assistant';
-            const prevMsg = messages[messages.length - 1];
-            if (prevMsg && prevMsg.role === role) {
-              prevMsg.content += `\n${item.text}`;
-            } else {
-              messages.push({ role, content: item.text });
-            }
-          }
-        }
+      for (const item of sanitizedHistory) {
+        messages.push({ role: item.role, content: item.text });
       }
 
       // Add user prompt, strictly keeping role alternation
@@ -95,10 +109,10 @@ async function startServer() {
             body: JSON.stringify({
               model,
               messages,
-              max_tokens: 80,
+              max_tokens: 90,
               temperature: 0.85,
             }),
-            signal: AbortSignal.timeout(2200),
+            signal: AbortSignal.timeout(2400),
           });
 
           if (res.ok) {
@@ -125,45 +139,46 @@ async function startServer() {
     if (ai && process.env.GEMINI_API_KEY) {
       try {
         const contents: Array<{ role: 'user' | 'model'; parts: [{ text: string }] }> = [];
-        if (Array.isArray(history)) {
-          for (const item of history.slice(-6)) {
-            if (item.text && item.from) {
-              contents.push({
-                role: item.from === 'me' ? 'user' : 'model',
-                parts: [{ text: item.text }],
-              });
-            }
-          }
+        
+        for (const item of sanitizedHistory) {
+          contents.push({
+            role: item.role === 'user' ? 'user' : 'model',
+            parts: [{ text: item.text }],
+          });
         }
-        contents.push({
-          role: 'user',
-          parts: [{ text: prompt || 'hey' }],
-        });
+
+        const lastContent = contents[contents.length - 1];
+        if (lastContent && lastContent.role === 'user') {
+          if (lastContent.parts[0].text.trim() !== (prompt || '').trim()) {
+            lastContent.parts[0].text += `\n${prompt || 'hey'}`;
+          }
+        } else {
+          contents.push({
+            role: 'user',
+            parts: [{ text: prompt || 'hey' }],
+          });
+        }
 
         let aiResponse;
-        try {
-          aiResponse = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents,
-            config: {
-              systemInstruction: persona.systemInstruction,
-              temperature: 0.9,
-              topP: 0.9,
-            },
-          });
-        } catch {
-          aiResponse = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-lite',
-            contents,
-            config: {
-              systemInstruction: persona.systemInstruction,
-              temperature: 0.9,
-              topP: 0.9,
-            },
-          });
+        const geminiModels = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+        for (const gModel of geminiModels) {
+          try {
+            aiResponse = await ai.models.generateContent({
+              model: gModel,
+              contents,
+              config: {
+                systemInstruction: persona.systemInstruction,
+                temperature: 0.9,
+                topP: 0.9,
+              },
+            });
+            if (aiResponse?.text) break;
+          } catch (gErr: any) {
+            console.warn(`[Gemini ${gModel}] error:`, gErr.message);
+          }
         }
 
-        const replyText = aiResponse.text?.trim();
+        const replyText = aiResponse?.text?.trim();
         if (replyText) {
           return {
             reply: replyText,
