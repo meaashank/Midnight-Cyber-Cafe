@@ -94,6 +94,7 @@ export interface PlaylistItem {
   source?: 'youtube' | 'spotify';
   embedUrl?: string;
   canonicalUrl?: string;
+  spotifyUri?: string;
   itemCount?: number;
   addedAt?: number;
 }
@@ -115,6 +116,8 @@ export interface PlaylistContextType {
   defaultPlaylistId: string;
   sourceType: 'youtube' | 'spotify';
   spotifyEmbedUrl: string | null;
+  spotifyController?: any;
+  setSpotifyController?: (controller: any) => void;
   play: () => void;
   pause: () => void;
   togglePlay: () => void;

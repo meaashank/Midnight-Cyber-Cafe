@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { usePlaylist } from '../PlaylistProvider';
 import {
   Play,
@@ -12,8 +12,6 @@ import {
   Plus,
   Settings2,
   Star,
-  Youtube,
-  Radio,
   ExternalLink,
 } from 'lucide-react';
 import { playMouseClick, playWindowsBalloon } from '../../utils/audio';
@@ -45,6 +43,7 @@ export const WinampApp: React.FC = () => {
     defaultPlaylistId,
     sourceType,
     spotifyEmbedUrl,
+    setSpotifyController,
     loadPlaylist,
     setAsDefaultPlaylist,
     setIsAddPlaylistModalOpen,
@@ -53,6 +52,10 @@ export const WinampApp: React.FC = () => {
   const [showPlaylist, setShowPlaylist] = useState(true);
   const [showEq, setShowEq] = useState(false);
   const [showSpotifyEmbed, setShowSpotifyEmbed] = useState(true);
+  const [isIframeApiLoaded, setIsIframeApiLoaded] = useState(false);
+
+  const spotifyHostRef = useRef<HTMLDivElement>(null);
+  const isControllerInitializedRef = useRef(false);
 
   // Format seconds to mm:ss
   const formatTime = (secs: number) => {
@@ -62,19 +65,181 @@ export const WinampApp: React.FC = () => {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
+  const isCurrentDefault = playlistId === defaultPlaylistId;
+  const isSpotify =
+    sourceType === 'spotify' ||
+    activePlaylist.source === 'spotify' ||
+    playlistId.startsWith('spotify_');
+
+  // Spotify Iframe API Controller initialization
+  useEffect(() => {
+    if (!isSpotify) return;
+
+    let isMounted = true;
+
+    const initController = () => {
+      const IFrameAPI = window.SpotifyIFrameAPI;
+      const hostEl = spotifyHostRef.current;
+      if (!IFrameAPI || !hostEl || isControllerInitializedRef.current) return;
+
+      const uri =
+        activePlaylist.spotifyUri ||
+        `spotify:playlist:${playlistId.replace('spotify_', '')}`;
+      const options = {
+        uri,
+        width: '100%',
+        height: 152,
+      };
+
+      try {
+        IFrameAPI.createController(hostEl, options, (controller: any) => {
+          if (!isMounted) return;
+          isControllerInitializedRef.current = true;
+          setIsIframeApiLoaded(true);
+          window.spotifyEmbedController = controller;
+          setSpotifyController?.(controller);
+
+          controller.addListener('playback_update', (e: any) => {
+            const { isPaused, position, duration: dur } = e.data || {};
+            if (typeof isPaused === 'boolean') {
+              // Context will sync via window message listener as well
+            }
+          });
+
+          controller.addListener('ready', () => {
+            if (isMounted) {
+              setIsIframeApiLoaded(true);
+            }
+          });
+        });
+      } catch (err) {
+        console.warn('Failed to create Spotify embed controller:', err);
+      }
+    };
+
+    // If Spotify Iframe API is already available on window
+    if (window.SpotifyIFrameAPI) {
+      initController();
+    } else {
+      // Register listener for Spotify Iframe API Ready
+      const prevCallback = window.onSpotifyIframeApiReady;
+      window.onSpotifyIframeApiReady = (IFrameAPI: any) => {
+        window.SpotifyIFrameAPI = IFrameAPI;
+        if (typeof prevCallback === 'function') {
+          try {
+            prevCallback(IFrameAPI);
+          } catch {
+            //
+          }
+        }
+        if (isMounted) {
+          initController();
+        }
+      };
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isSpotify, activePlaylist, playlistId, setSpotifyController]);
+
+  // Winamp Transport Controls (Guaranteed user gesture execution for Spotify)
   const handlePlay = () => {
     playMouseClick();
+    // 1. Fire Provider state and postMessage dispatch
     play();
+
+    // 2. Direct user-gesture execution on active controller or iframes
+    if (isSpotify) {
+      const ctrl = window.spotifyEmbedController;
+      if (ctrl) {
+        try {
+          if (typeof ctrl.resume === 'function') {
+            ctrl.resume();
+          } else if (typeof ctrl.play === 'function') {
+            ctrl.play();
+          } else if (typeof ctrl.togglePlay === 'function') {
+            ctrl.togglePlay();
+          }
+        } catch (e) {
+          console.warn('Error invoking Spotify controller play:', e);
+        }
+      }
+
+      // Direct postMessage to any Spotify iframe
+      const iframes = document.querySelectorAll<HTMLIFrameElement>('iframe[src*="spotify.com"]');
+      iframes.forEach((frame) => {
+        try {
+          frame.contentWindow?.postMessage({ command: 'resume' }, '*');
+          frame.contentWindow?.postMessage({ command: 'play' }, '*');
+          frame.contentWindow?.postMessage({ command: 'toggle' }, '*');
+          frame.contentWindow?.postMessage(JSON.stringify({ command: 'resume' }), '*');
+          frame.contentWindow?.postMessage(JSON.stringify({ command: 'play' }), '*');
+          frame.contentWindow?.postMessage(JSON.stringify({ command: 'toggle' }), '*');
+        } catch {
+          //
+        }
+      });
+    }
   };
 
   const handlePause = () => {
     playMouseClick();
     pause();
+
+    if (isSpotify) {
+      const ctrl = window.spotifyEmbedController;
+      if (ctrl) {
+        try {
+          if (typeof ctrl.pause === 'function') {
+            ctrl.pause();
+          } else if (typeof ctrl.togglePlay === 'function') {
+            ctrl.togglePlay();
+          }
+        } catch (e) {
+          console.warn('Error invoking Spotify controller pause:', e);
+        }
+      }
+
+      const iframes = document.querySelectorAll<HTMLIFrameElement>('iframe[src*="spotify.com"]');
+      iframes.forEach((frame) => {
+        try {
+          frame.contentWindow?.postMessage({ command: 'pause' }, '*');
+          frame.contentWindow?.postMessage({ command: 'toggle' }, '*');
+          frame.contentWindow?.postMessage(JSON.stringify({ command: 'pause' }), '*');
+          frame.contentWindow?.postMessage(JSON.stringify({ command: 'toggle' }), '*');
+        } catch {
+          //
+        }
+      });
+    }
   };
 
   const handleStop = () => {
     playMouseClick();
     stop();
+
+    if (isSpotify) {
+      const ctrl = window.spotifyEmbedController;
+      if (ctrl) {
+        try {
+          ctrl.pause?.();
+          ctrl.seek?.(0);
+        } catch (e) {
+          console.warn(e);
+        }
+      }
+
+      const iframes = document.querySelectorAll<HTMLIFrameElement>('iframe[src*="spotify.com"]');
+      iframes.forEach((frame) => {
+        try {
+          frame.contentWindow?.postMessage({ command: 'pause' }, '*');
+          frame.contentWindow?.postMessage(JSON.stringify({ command: 'pause' }), '*');
+        } catch {
+          //
+        }
+      });
+    }
   };
 
   const handleNext = () => {
@@ -86,9 +251,6 @@ export const WinampApp: React.FC = () => {
     playMouseClick();
     prevTrack();
   };
-
-  const isCurrentDefault = playlistId === defaultPlaylistId;
-  const isSpotify = sourceType === 'spotify' || activePlaylist.source === 'spotify' || playlistId.startsWith('spotify_');
 
   return (
     <div className="w-full h-full bg-[#1b1c20] text-[#00ff00] font-mono text-[10px] flex flex-col p-1.5 select-none overflow-y-auto">
@@ -129,7 +291,7 @@ export const WinampApp: React.FC = () => {
                 <span className="truncate">{activePlaylist.title}</span>
               </span>
               <span className="text-yellow-400 font-bold">
-                {isSpotify ? 'SPOTIFY STREAM' : isPlaying ? 'STEREO LIVE' : isLoading ? 'BUFFERING' : 'IDLE'}
+                {isSpotify ? (isPlaying ? 'SPOTIFY PLAYING' : 'SPOTIFY IDLE') : isPlaying ? 'STEREO LIVE' : isLoading ? 'BUFFERING' : 'IDLE'}
               </span>
               <span>
                 {formatTime(currentTime)} / {duration > 0 ? formatTime(duration) : currentTrack?.duration || (isSpotify ? 'LIVE' : '3:30')}
@@ -145,11 +307,8 @@ export const WinampApp: React.FC = () => {
             min="0"
             max={duration || 100}
             value={currentTime || 0}
-            disabled={isSpotify}
             onChange={(e) => seekTo(Number(e.target.value))}
-            className={`w-full h-1.5 bg-[#0a0a0a] accent-[#00ff44] rounded ${
-              isSpotify ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'
-            }`}
+            className="w-full h-1.5 bg-[#0a0a0a] accent-[#00ff44] rounded cursor-pointer"
           />
         </div>
 
@@ -169,7 +328,7 @@ export const WinampApp: React.FC = () => {
             <button
               type="button"
               onClick={handlePlay}
-              title="Play (Space)"
+              title="Play Winamp (Space)"
               className={`p-1.5 bg-gradient-to-b from-[#555b66] to-[#2b2e34] hover:brightness-125 active:brightness-75 border border-white/30 rounded-xs cursor-pointer shadow-xs ${
                 isPlaying ? 'text-[#00ff66] border-green-500' : 'text-white'
               }`}
@@ -179,7 +338,7 @@ export const WinampApp: React.FC = () => {
             <button
               type="button"
               onClick={handlePause}
-              title="Pause (Space)"
+              title="Pause Winamp (Space)"
               className="p-1.5 bg-gradient-to-b from-[#555b66] to-[#2b2e34] hover:brightness-125 active:brightness-75 border border-white/30 rounded-xs text-white cursor-pointer shadow-xs"
             >
               <Pause size={10} />
@@ -280,7 +439,10 @@ export const WinampApp: React.FC = () => {
             </span>
             <div className="flex items-center gap-2">
               <a
-                href={activePlaylist.canonicalUrl || `https://open.spotify.com/playlist/${playlistId.replace('spotify_', '')}`}
+                href={
+                  activePlaylist.canonicalUrl ||
+                  `https://open.spotify.com/playlist/${playlistId.replace('spotify_', '')}`
+                }
                 target="_blank"
                 rel="noreferrer"
                 className="text-gray-400 hover:text-white flex items-center gap-0.5 text-[8.5px]"
@@ -290,16 +452,23 @@ export const WinampApp: React.FC = () => {
               </a>
             </div>
           </div>
-          <div className="w-full rounded-xs overflow-hidden bg-black">
-            <iframe
-              src={spotifyEmbedUrl}
-              width="100%"
-              height="152"
-              title="Spotify Winamp Integration"
-              allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-              loading="lazy"
-              className="border-0 rounded-xs"
-            />
+          <div className="w-full rounded-xs overflow-hidden bg-black min-h-[152px] relative">
+            {/* Spotify Iframe API Controller Host */}
+            <div id="spotify-embed-controller-element" ref={spotifyHostRef} className="w-full" />
+
+            {/* Standard Spotify Iframe Fallback */}
+            {!isIframeApiLoaded && (
+              <iframe
+                id="spotify-active-embed-iframe"
+                src={spotifyEmbedUrl}
+                width="100%"
+                height="152"
+                title="Spotify Winamp Integration"
+                allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                loading="lazy"
+                className="border-0 rounded-xs absolute inset-0 w-full h-full"
+              />
+            )}
           </div>
         </div>
       )}

@@ -5,6 +5,7 @@ export interface ParsedMediaInput {
   originalInput: string;
   embedUrl?: string;
   canonicalUrl?: string;
+  spotifyUri?: string;
 }
 
 /**
@@ -46,6 +47,7 @@ export function parseMediaInput(input: string): ParsedMediaInput | null {
       id,
       originalInput: trimmed,
       canonicalUrl: `https://open.spotify.com/${type}/${id}`,
+      spotifyUri: `spotify:${type}:${id}`,
       embedUrl: `https://open.spotify.com/embed/${type}/${id}?utm_source=generator&theme=0`,
     };
   }
@@ -65,6 +67,7 @@ export function parseMediaInput(input: string): ParsedMediaInput | null {
           id,
           originalInput: trimmed,
           canonicalUrl: `https://open.spotify.com/${type}/${id}`,
+          spotifyUri: `spotify:${type}:${id}`,
           embedUrl: `https://open.spotify.com/embed/${type}/${id}?utm_source=generator&theme=0`,
         };
       }
@@ -80,6 +83,7 @@ export function parseMediaInput(input: string): ParsedMediaInput | null {
           id,
           originalInput: trimmed,
           canonicalUrl: `https://open.spotify.com/${type}/${id}`,
+          spotifyUri: `spotify:${type}:${id}`,
           embedUrl: `https://open.spotify.com/embed/${type}/${id}?utm_source=generator&theme=0`,
         };
       }

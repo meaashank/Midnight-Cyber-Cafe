@@ -11,6 +11,7 @@ export const USER_SPOTIFY_PLAYLIST: PlaylistItem = {
   isCustom: false,
   type: 'playlist',
   source: 'spotify',
+  spotifyUri: 'spotify:playlist:4LttUvcLoTtv3Ue54lyqkI',
   canonicalUrl: 'https://open.spotify.com/playlist/4LttUvcLoTtv3Ue54lyqkI',
   embedUrl: 'https://open.spotify.com/embed/playlist/4LttUvcLoTtv3Ue54lyqkI?utm_source=generator&theme=0',
 };
@@ -34,6 +35,9 @@ declare global {
   interface Window {
     YT: any;
     onYouTubeIframeAPIReady: () => void;
+    onSpotifyIframeApiReady?: (IFrameAPI: any) => void;
+    SpotifyIFrameAPI?: any;
+    spotifyEmbedController?: any;
   }
 }
 
@@ -107,7 +111,7 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [isAddPlaylistModalOpen, setIsAddPlaylistModalOpen] = useState(false);
   const [tracks, setTracks] = useState<YouTubeTrack[]>(INITIAL_FALLBACK_TRACKS);
   const [currentTrackIndex, setCurrentTrackIndex] = useState<number>(0);
-  const [isPlaying, setIsPlaying] = useState<boolean>(true);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
@@ -120,6 +124,8 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [spotifyEmbedUrl, setSpotifyEmbedUrl] = useState<string | null>(
     'https://open.spotify.com/embed/playlist/4LttUvcLoTtv3Ue54lyqkI?utm_source=generator&theme=0'
   );
+  const [spotifyController, setSpotifyControllerState] = useState<any>(null);
+  const spotifyControllerRef = useRef<any>(null);
 
   const playerRef = useRef<any>(null);
   const animFrameRef = useRef<number | null>(null);
@@ -145,6 +151,72 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       // ignore
     }
   }, [playlistId]);
+
+  // Expose controller setter
+  const setSpotifyController = useCallback((ctrl: any) => {
+    spotifyControllerRef.current = ctrl;
+    setSpotifyControllerState(ctrl);
+    window.spotifyEmbedController = ctrl;
+  }, []);
+
+  // PostMessage broadcaster to any Spotify iframes
+  const sendSpotifyCommand = useCallback((cmd: 'toggle' | 'play' | 'pause' | 'resume') => {
+    try {
+      const iframes = document.querySelectorAll<HTMLIFrameElement>('iframe[src*="spotify.com"]');
+      iframes.forEach((frame) => {
+        try {
+          frame.contentWindow?.postMessage({ command: cmd }, '*');
+          frame.contentWindow?.postMessage({ type: 'command', command: cmd }, '*');
+          frame.contentWindow?.postMessage(JSON.stringify({ command: cmd }), '*');
+          frame.contentWindow?.postMessage(JSON.stringify({ type: 'command', command: cmd }), '*');
+        } catch {
+          // ignore cross-origin security errors
+        }
+      });
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Listen to postMessage events from Spotify iframe
+  useEffect(() => {
+    const handleSpotifyMessage = (event: MessageEvent) => {
+      if (!event.origin || !event.origin.includes('spotify.com')) return;
+      try {
+        let data = event.data;
+        if (typeof data === 'string') {
+          try {
+            data = JSON.parse(data);
+          } catch {
+            return;
+          }
+        }
+        if (!data) return;
+
+        const update = data.payload || data.data || data;
+        if (
+          data.type === 'playback_update' ||
+          update.type === 'playback_update' ||
+          typeof update.isPaused === 'boolean'
+        ) {
+          if (typeof update.isPaused === 'boolean') {
+            setIsPlaying(!update.isPaused);
+          }
+          if (typeof update.position === 'number') {
+            setCurrentTime(update.position / 1000);
+          }
+          if (typeof update.duration === 'number' && update.duration > 0) {
+            setDuration(update.duration / 1000);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    window.addEventListener('message', handleSpotifyMessage);
+    return () => window.removeEventListener('message', handleSpotifyMessage);
+  }, []);
 
   // Helper: Fetch oEmbed metadata for a single YouTube video or track
   const fetchVideoMetadata = async (videoId: string): Promise<{ title: string; artist: string }> => {
@@ -350,11 +422,19 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       // Check if this item is a Spotify item
       const item = playlists.find((p) => p.id === newPlaylistId);
-      const isSpotify = item?.source === 'spotify' || newPlaylistId.startsWith('spotify_') || (item?.embedUrl && item.embedUrl.includes('spotify.com'));
+      const isSpotify =
+        item?.source === 'spotify' ||
+        newPlaylistId.startsWith('spotify_') ||
+        (item?.embedUrl && item.embedUrl.includes('spotify.com'));
 
       if (isSpotify) {
         setSourceType('spotify');
-        const embedUrl = item?.embedUrl || `https://open.spotify.com/embed/${item?.type || 'playlist'}/${newPlaylistId.replace('spotify_', '')}?utm_source=generator&theme=0`;
+        const embedUrl =
+          item?.embedUrl ||
+          `https://open.spotify.com/embed/${item?.type || 'playlist'}/${newPlaylistId.replace(
+            'spotify_',
+            ''
+          )}?utm_source=generator&theme=0`;
         setSpotifyEmbedUrl(embedUrl);
 
         // Pause YouTube player if active
@@ -363,6 +443,19 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             playerRef.current.pauseVideo();
           } catch {
             //
+          }
+        }
+
+        // If Spotify controller is already initialized, switch to new URI
+        const uri =
+          item?.spotifyUri ||
+          `spotify:${item?.type || 'playlist'}:${newPlaylistId.replace('spotify_', '')}`;
+        const ctrl = spotifyControllerRef.current || window.spotifyEmbedController;
+        if (ctrl?.loadUri) {
+          try {
+            ctrl.loadUri(uri);
+          } catch (e) {
+            console.warn('Error calling loadUri on controller:', e);
           }
         }
 
@@ -467,6 +560,7 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           isCustom: true,
           source: 'spotify',
           type: parsed.type,
+          spotifyUri: parsed.spotifyUri || `spotify:${parsed.type}:${parsed.id}`,
           embedUrl: parsed.embedUrl,
           canonicalUrl: parsed.canonicalUrl,
           addedAt: Date.now(),
@@ -526,13 +620,15 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Remove custom playlist
   const removeCustomPlaylist = useCallback(
     (idToRemove: string) => {
-      if (idToRemove === INITIAL_DEFAULT_PLAYLIST_ID) return; // Prevent removing factory default
+      if (idToRemove === INITIAL_DEFAULT_PLAYLIST_ID || idToRemove === USER_SPOTIFY_PLAYLIST_ID) {
+        return; // Prevent removing factory defaults
+      }
 
       setPlaylists((prev) => prev.filter((p) => p.id !== idToRemove));
 
       // If removing the currently chosen default, reset default to factory
       if (defaultPlaylistId === idToRemove) {
-        setDefaultPlaylistIdState(INITIAL_DEFAULT_PLAYLIST_ID);
+        setDefaultPlaylistIdState(USER_SPOTIFY_PLAYLIST_ID);
         try {
           localStorage.removeItem(STORAGE_CUSTOM_DEFAULT_ID_KEY);
         } catch {
@@ -541,7 +637,7 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
 
       if (playlistId === idToRemove) {
-        loadPlaylist(INITIAL_DEFAULT_PLAYLIST_ID);
+        loadPlaylist(USER_SPOTIFY_PLAYLIST_ID);
       }
     },
     [defaultPlaylistId, playlistId, loadPlaylist]
@@ -549,7 +645,7 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Reset to default playlist
   const resetToDefaultPlaylist = useCallback(() => {
-    loadPlaylist(defaultPlaylistId || INITIAL_DEFAULT_PLAYLIST_ID);
+    loadPlaylist(defaultPlaylistId || USER_SPOTIFY_PLAYLIST_ID);
   }, [defaultPlaylistId, loadPlaylist]);
 
   // Initialize YouTube Iframe Player
@@ -747,6 +843,23 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const play = useCallback(() => {
     if (sourceType === 'spotify') {
       setIsPlaying(true);
+      const ctrl = spotifyControllerRef.current || window.spotifyEmbedController;
+      if (ctrl) {
+        try {
+          if (typeof ctrl.resume === 'function') {
+            ctrl.resume();
+          } else if (typeof ctrl.play === 'function') {
+            ctrl.play();
+          } else if (typeof ctrl.togglePlay === 'function') {
+            ctrl.togglePlay();
+          }
+        } catch (e) {
+          console.warn('Spotify controller play error:', e);
+        }
+      }
+      sendSpotifyCommand('resume');
+      sendSpotifyCommand('play');
+      sendSpotifyCommand('toggle');
       return;
     }
     if (playerRef.current && playerRef.current.playVideo) {
@@ -757,11 +870,25 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         console.warn('Play error:', e);
       }
     }
-  }, [sourceType]);
+  }, [sourceType, sendSpotifyCommand]);
 
   const pause = useCallback(() => {
     if (sourceType === 'spotify') {
       setIsPlaying(false);
+      const ctrl = spotifyControllerRef.current || window.spotifyEmbedController;
+      if (ctrl) {
+        try {
+          if (typeof ctrl.pause === 'function') {
+            ctrl.pause();
+          } else if (typeof ctrl.togglePlay === 'function') {
+            ctrl.togglePlay();
+          }
+        } catch (e) {
+          console.warn('Spotify controller pause error:', e);
+        }
+      }
+      sendSpotifyCommand('pause');
+      sendSpotifyCommand('toggle');
       return;
     }
     if (playerRef.current && playerRef.current.pauseVideo) {
@@ -772,15 +899,34 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         console.warn('Pause error:', e);
       }
     }
-  }, [sourceType]);
+  }, [sourceType, sendSpotifyCommand]);
 
   const togglePlay = useCallback(() => {
+    if (sourceType === 'spotify') {
+      const ctrl = spotifyControllerRef.current || window.spotifyEmbedController;
+      if (ctrl) {
+        try {
+          if (typeof ctrl.togglePlay === 'function') {
+            ctrl.togglePlay();
+          } else if (isPlaying) {
+            ctrl.pause?.();
+          } else {
+            ctrl.resume?.() || ctrl.play?.();
+          }
+        } catch (e) {
+          console.warn('Spotify togglePlay error:', e);
+        }
+      }
+      sendSpotifyCommand('toggle');
+      setIsPlaying((prev) => !prev);
+      return;
+    }
     if (isPlaying) {
       pause();
     } else {
       play();
     }
-  }, [isPlaying, play, pause]);
+  }, [isPlaying, sourceType, play, pause, sendSpotifyCommand]);
 
   // Global Spacebar Hotkey: Pressing Space toggles Play/Pause for stream in sync
   useEffect(() => {
@@ -813,6 +959,16 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (sourceType === 'spotify') {
       setIsPlaying(false);
       setCurrentTime(0);
+      const ctrl = spotifyControllerRef.current || window.spotifyEmbedController;
+      if (ctrl) {
+        try {
+          ctrl.pause?.();
+          ctrl.seek?.(0);
+        } catch (e) {
+          console.warn('Spotify stop error:', e);
+        }
+      }
+      sendSpotifyCommand('pause');
       return;
     }
     if (playerRef.current && playerRef.current.stopVideo) {
@@ -824,7 +980,7 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         console.warn('Stop error:', e);
       }
     }
-  }, [sourceType]);
+  }, [sourceType, sendSpotifyCommand]);
 
   const nextTrack = useCallback(() => {
     if (sourceType === 'spotify') return;
@@ -888,7 +1044,19 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const seekTo = useCallback(
     (seconds: number) => {
-      if (sourceType === 'youtube' && playerRef.current && playerRef.current.seekTo) {
+      if (sourceType === 'spotify') {
+        const ctrl = spotifyControllerRef.current || window.spotifyEmbedController;
+        if (ctrl?.seek) {
+          try {
+            ctrl.seek(seconds);
+            setCurrentTime(seconds);
+          } catch (e) {
+            console.warn('Spotify seek error:', e);
+          }
+        }
+        return;
+      }
+      if (playerRef.current && playerRef.current.seekTo) {
         try {
           playerRef.current.seekTo(seconds, true);
           setCurrentTime(seconds);
@@ -914,10 +1082,12 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       title:
         playlistId === INITIAL_DEFAULT_PLAYLIST_ID
           ? INITIAL_DEFAULT_PLAYLIST_TITLE
+          : playlistId === USER_SPOTIFY_PLAYLIST_ID
+          ? USER_SPOTIFY_PLAYLIST_TITLE
           : playlistId.startsWith('spotify_')
           ? 'Custom Spotify Playlist'
           : 'Custom YouTube Playlist',
-      isCustom: playlistId !== INITIAL_DEFAULT_PLAYLIST_ID,
+      isCustom: playlistId !== INITIAL_DEFAULT_PLAYLIST_ID && playlistId !== USER_SPOTIFY_PLAYLIST_ID,
       source: playlistId.startsWith('spotify_') ? 'spotify' : 'youtube',
     };
 
@@ -940,6 +1110,8 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     defaultPlaylistId,
     sourceType,
     spotifyEmbedUrl,
+    spotifyController,
+    setSpotifyController,
     play,
     pause,
     togglePlay,
