@@ -11,6 +11,9 @@ export interface VlcErrorInfo {
   errorCode?: number | string;
   errorName?: string;
   statusCode?: number;
+  upstreamHost?: string;
+  tokenStatus?: string;
+  suggestedAction?: string;
   timestamp?: string;
 }
 
@@ -57,7 +60,7 @@ ${error.details || 'No extended stack trace available'}
         <div className="bg-gradient-to-r from-[#0055ea] via-[#3593ff] to-[#0055ea] text-white px-2.5 py-1.5 flex items-center justify-between font-bold text-[11.5px] shrink-0">
           <div className="flex items-center gap-1.5">
             <VlcConeIcon size={15} />
-            <span>{error.title || 'VLC (v0.8.6) - Stream Connection Error'}</span>
+            <span>{error.title || 'VLC (v3.0.21) - Stream Connection Error'}</span>
           </div>
           <button
             type="button"
@@ -81,8 +84,30 @@ ${error.details || 'No extended stack trace available'}
               <div className="font-bold text-[13px] text-[#900] leading-snug">
                 {error.message}
               </div>
-              <div className="text-[10.5px] text-gray-600 mt-0.5">
-                VLC could not open this network stream. Detailed diagnostic logs below:
+              <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                {error.statusCode && (
+                  <span className={`px-1.5 py-0.5 rounded-xs font-mono font-bold text-[10px] ${
+                    error.statusCode >= 500
+                      ? 'bg-red-800 text-white'
+                      : error.statusCode === 429
+                      ? 'bg-amber-800 text-amber-100'
+                      : error.statusCode === 403
+                      ? 'bg-orange-800 text-orange-100'
+                      : 'bg-gray-800 text-white'
+                  }`}>
+                    HTTP {error.statusCode}
+                  </span>
+                )}
+                {error.upstreamHost && (
+                  <span className="px-1.5 py-0.5 bg-blue-900/10 text-blue-900 font-mono text-[10px] rounded-xs border border-blue-300">
+                    Host: {error.upstreamHost}
+                  </span>
+                )}
+                {error.tokenStatus && (
+                  <span className="px-1.5 py-0.5 bg-red-100 text-red-900 font-bold text-[9.5px] rounded-xs border border-red-300">
+                    {error.tokenStatus}
+                  </span>
+                )}
               </div>
             </div>
           </div>

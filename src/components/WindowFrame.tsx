@@ -91,7 +91,7 @@ export const WindowFrame: React.FC<WindowFrameProps> = ({
     <div
       id={`window-${instance.id}`}
       onMouseDown={onFocus}
-      className={`flex flex-col select-none transition-all overflow-hidden ${
+      className={`flex flex-col select-none transition-all overflow-hidden bg-[#ece9d8] isolate ${
         instance.isMaximized ? 'rounded-none border-[#0055ea]' : 'rounded-t-[7px]'
       } ${
         isActive

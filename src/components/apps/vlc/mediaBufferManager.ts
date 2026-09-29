@@ -102,6 +102,17 @@ class MediaBufferManager {
         const resolvedMime =
           response.headers.get('content-type') || this.detectMimeType(url, mimeType);
 
+        // Maximum memory buffer size: 40MB.
+        // Massive files (e.g. 500MB to 7GB+ movies) must NOT be buffered into JavaScript memory (Uint8Array[]).
+        // Buffering gigabytes into RAM exhausts the browser V8 heap and saturates network bandwidth,
+        // causing severe stuttering, stalls, and frequent buffering. Native streaming must be used instead.
+        const MAX_MEMORY_CACHE_BYTES = 40 * 1024 * 1024;
+        if (totalBytes > MAX_MEMORY_CACHE_BYTES) {
+          // Large stream detected: abort full-file download and stream progressively via HTTP Range
+          controller.abort();
+          return fetchUrl;
+        }
+
         if (!response.body) {
           const blob = await response.blob();
           const objectUrl = URL.createObjectURL(
@@ -122,8 +133,14 @@ class MediaBufferManager {
           const { done, value } = await reader.read();
           if (done) break;
           if (value) {
-            chunks.push(value);
             receivedBytes += value.length;
+            if (receivedBytes > MAX_MEMORY_CACHE_BYTES) {
+              // Safety ceiling: stream is larger than 40MB; cancel in-memory fetch immediately
+              // to free up network bandwidth for native video playback
+              controller.abort();
+              return fetchUrl;
+            }
+            chunks.push(value);
             if (onProgress && totalBytes > 0) {
               const pct = Math.min(100, Math.round((receivedBytes / totalBytes) * 100));
               onProgress(pct, receivedBytes, totalBytes);

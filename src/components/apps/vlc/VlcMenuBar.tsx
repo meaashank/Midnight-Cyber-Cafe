@@ -318,6 +318,11 @@ export const VlcMenuBar: React.FC<VlcMenuBarProps> = ({
             >
               {currentAspectRatio === 'fill' ? '✓ ' : '  '}Fill / Stretch
             </div>
+            <div className="border-t border-[#d4d0c8] my-0.5" />
+            <div className="px-4 py-1 text-gray-700 flex items-center justify-between text-[10px]">
+              <span>Scanlines (Lines)</span>
+              <span className="text-green-700 font-bold font-mono">OFF</span>
+            </div>
           </div>
         )}
       </div>

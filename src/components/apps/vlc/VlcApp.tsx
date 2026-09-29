@@ -115,7 +115,7 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
       timestamp: new Date().toTimeString().split(' ')[0],
       level: 'info',
       module: 'main',
-      message: 'VLC media player 0.8.6 Janice initialised with deep 20s caching',
+      message: 'VLC media player 3.0.21 Vetinari initialized with multi-codec engine and auto-reconnect',
     },
   ]);
   const [errorModalData, setErrorModalData] = useState<{
@@ -281,6 +281,39 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
     return () => clearInterval(interval);
   }, [isPlaying, isPaused]);
 
+  // Playback Stall Watchdog: Detects if stream stalls mid-movie for > 8s and auto-recovers
+  const lastProgressTimeRef = useRef<{ time: number; stamp: number }>({ time: 0, stamp: Date.now() });
+  useEffect(() => {
+    if (!isPlaying || isPaused) return;
+
+    const watchdog = setInterval(() => {
+      const vid = videoRef.current;
+      if (!vid || !isPlaying || isPaused || isScrubbingRef.current) return;
+
+      const now = Date.now();
+      if (vid.currentTime !== lastProgressTimeRef.current.time) {
+        lastProgressTimeRef.current = { time: vid.currentTime, stamp: now };
+      } else {
+        // Video has not advanced despite being in playing state
+        const stalledMs = now - lastProgressTimeRef.current.stamp;
+        if (stalledMs > 8000 && duration > 0 && vid.currentTime < duration - 15) {
+          lastProgressTimeRef.current.stamp = now;
+          addLog('warn', 'stream', `Watchdog detected stream stall at ${vid.currentTime.toFixed(1)}s. Triggering seamless stream refresh...`);
+          const total = Math.floor(vid.currentTime);
+          const h = Math.floor(total / 3600);
+          const m = Math.floor((total % 3600) / 60);
+          const s = total % 60;
+          const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+          const timeStr = h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+          showOsd(`🔄 Stream stall recovered (${timeStr})`);
+          seekMedia(vid.currentTime);
+        }
+      }
+    }, 2000);
+
+    return () => clearInterval(watchdog);
+  }, [isPlaying, isPaused, duration]);
+
   // Cleanup on unmount (stop playing media and revoke cached blobs)
   useEffect(() => {
     // Preload default sample tracks into memory Blob Object URLs for instant 0ms playback & scrub
@@ -303,6 +336,7 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
   const fallbackAttemptRef = useRef<Record<string, number>>({});
   const isScrubbingRef = useRef<boolean>(false);
   const scrubDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const bufferDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fast Stream URL Normalizer (Prefers in-memory Blob Object URL for 0ms scrub latency, proxies external URLs)
   const getOptimizedMediaUrl = useCallback((url: string): string => {
@@ -319,9 +353,13 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
     return url;
   }, []);
 
-  // Background buffer loader for active track
+  // Background buffer loader for active track (restricted to small audio files; never large video streams)
   const startBackgroundBuffering = useCallback((track: MediaTrack) => {
     if (!track.url || track.url.startsWith('blob:')) return;
+    // Massive streams (like 7GB video files) must NEVER be downloaded into RAM in background!
+    // Native progressive Range streaming handles massive video with zero memory bloat and no bandwidth choking.
+    if (track.format !== 'audio') return;
+
     mediaBufferManager
       .loadAsBlobUrl(track.url, track.mimeType, (pct) => {
         const targetDur = track.duration || duration || 10;
@@ -329,7 +367,7 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
       })
       .then((blobUrl) => {
         if (blobUrl && blobUrl.startsWith('blob:')) {
-          addLog('info', 'cache', `Media fully buffered in memory: ${track.title}`);
+          addLog('info', 'cache', `Audio fully buffered in memory: ${track.title}`);
         }
       })
       .catch(() => {});
@@ -354,9 +392,26 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
       setIsPaused(false);
       setStatusText(`Playing: ${targetTrack.title || 'Media'}`);
       showOsd('▶ Play');
-      addLog('info', 'decoder', `Playback started instantly`);
+      addLog('info', 'decoder', `Playback started`);
 
-      // Trigger background memory caching for instant 20+ second seeking
+      // Instantly probe exact total movie duration and resolution via ffprobe
+      if (targetTrack.url && targetTrack.url.startsWith('http')) {
+        fetch(`/api/media-probe?url=${encodeURIComponent(targetTrack.url)}`)
+          .then((r) => r.json())
+          .then((data) => {
+            if (data?.success && data?.duration > 0) {
+              setDuration(data.duration);
+              if (data.width && data.height) {
+                setVideoDimensions({ width: data.width, height: data.height });
+              }
+              targetTrack.duration = data.duration;
+              addLog('info', 'decoder', `Stream metadata probed: ${data.duration.toFixed(1)}s (${data.width}x${data.height})`);
+            }
+          })
+          .catch(() => {});
+      }
+
+      // Trigger background memory caching for small audio clips only
       startBackgroundBuffering(targetTrack);
     } catch (err: any) {
       setIsBuffering(false);
@@ -435,27 +490,60 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
       isScrubbingRef.current = false;
     }, 500);
 
-    if (preferences.fastSeekEnabled && typeof (videoRef.current as any).fastSeek === 'function') {
-      try {
-        (videoRef.current as any).fastSeek(seconds);
-      } catch {
-        videoRef.current.currentTime = seconds;
+    const vid = videoRef.current;
+    const maxDur = duration > 0 ? duration : (vid.duration || 99999);
+    const clampedSeconds = Math.max(0, Math.min(maxDur, seconds));
+    setCurrentTime(clampedSeconds);
+
+    // Determine if browser can seek natively or if live server seek is required
+    let canSeekNatively = false;
+    if (vid.seekable && vid.seekable.length > 0) {
+      for (let i = 0; i < vid.seekable.length; i++) {
+        if (clampedSeconds >= vid.seekable.start(i) && clampedSeconds <= vid.seekable.end(i)) {
+          canSeekNatively = true;
+          break;
+        }
       }
-    } else {
-      videoRef.current.currentTime = seconds;
     }
-    setCurrentTime(seconds);
+
+    const isRemuxPipedStream = vid.src?.includes('/api/stream');
+
+    if (isRemuxPipedStream && !canSeekNatively) {
+      // Seek remuxed stream upstream using server-side ffmpeg fast input seek (-ss)
+      const base = currentTrack?.url || '';
+      const streamUrl = `/api/stream?url=${encodeURIComponent(base)}&ss=${clampedSeconds.toFixed(1)}`;
+      vid.src = streamUrl;
+      vid.play().catch(() => {});
+      addLog('info', 'stream', `Upstream seek to ${clampedSeconds.toFixed(1)}s`);
+    } else {
+      try {
+        if (preferences.fastSeekEnabled && typeof (vid as any).fastSeek === 'function') {
+          (vid as any).fastSeek(clampedSeconds);
+        } else {
+          vid.currentTime = clampedSeconds;
+        }
+      } catch {
+        vid.currentTime = clampedSeconds;
+      }
+    }
+
     updateBufferedProgress();
-    const m = Math.floor(seconds / 60);
-    const s = Math.floor(seconds % 60);
+    const totalSecs = Math.floor(clampedSeconds);
+    const h = Math.floor(totalSecs / 3600);
+    const m = Math.floor((totalSecs % 3600) / 60);
+    const s = totalSecs % 60;
+    const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+    const timeStr = h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
     const cacheSec = ((preferences.networkCachingMs || 20000) / 1000).toFixed(0);
-    showOsd(`⏱ ${m < 10 ? `0${m}` : m}:${s < 10 ? `0${s}` : s} [Buffer: ${cacheSec}s]`);
-    addLog('debug', 'stream', `Seeked to ${seconds.toFixed(2)}s (Buffer target: ${cacheSec}s)`);
+    showOsd(`⏱ ${timeStr} [Buffer: ${cacheSec}s]`);
+    addLog('debug', 'stream', `Seeked to ${clampedSeconds.toFixed(2)}s (Buffer target: ${cacheSec}s)`);
   };
 
   const jumpBy = (deltaSeconds: number) => {
     if (!videoRef.current) return;
-    const target = Math.max(0, Math.min(duration || 9999, videoRef.current.currentTime + deltaSeconds));
+    const cur = currentTime || videoRef.current.currentTime || 0;
+    const maxDur = duration > 0 ? duration : (videoRef.current.duration || 99999);
+    const target = Math.max(0, Math.min(maxDur, cur + deltaSeconds));
     seekMedia(target);
     showOsd(deltaSeconds > 0 ? `⏩ +${deltaSeconds}s` : `⏪ ${deltaSeconds}s`);
   };
@@ -590,8 +678,8 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
     }
   };
 
-  // 5. Diagnostic Error Handling with Dialog and Log Support
-  const handlePlaybackError = (err?: any, failedUrl?: string) => {
+  // 5. Diagnostic Error Handling with Intelligent Network Probing & Log Support
+  const handlePlaybackError = async (err?: any, failedUrl?: string) => {
     const rawMsg = err?.message || 'Media decode failure or network stream unreachable.';
     const url = failedUrl || currentTrack?.url || 'media';
     const cleanMsg = rawMsg.includes('play()') ? 'Playback was interrupted or requires user permission.' : rawMsg;
@@ -624,31 +712,126 @@ export const VlcApp: React.FC<VlcAppProps> = ({ onClose, initialMediaUrl, initia
       else if (mediaErr.code === 4) errCodeName = 'MEDIA_ERR_SRC_NOT_SUPPORTED (code 4)';
     }
 
+    // Step A: Parse URL parameters for signed tokens and expiration
+    let upstreamHost = '';
+    let tokenStatus = '';
+    let tokenDetail = '';
+    try {
+      const parsed = new URL(url);
+      upstreamHost = parsed.hostname;
+      const tParam =
+        parsed.searchParams.get('t') ||
+        parsed.searchParams.get('expires') ||
+        parsed.searchParams.get('exp');
+      if (tParam && /^\d{10,13}$/.test(tParam)) {
+        const tokenSec = tParam.length === 13 ? Math.floor(Number(tParam) / 1000) : Number(tParam);
+        const nowSec = Math.floor(Date.now() / 1000);
+        const diff = tokenSec - nowSec;
+        if (diff < 0) {
+          const expiredMins = Math.ceil(Math.abs(diff) / 60);
+          tokenStatus = `Token Expired (${expiredMins}m ago)`;
+          tokenDetail = `• Signed token timestamp (t=${tParam}) expired ${Math.abs(diff)}s ago at ${new Date(tokenSec * 1000).toLocaleTimeString()}. Streaming CDNs immediately block or rate-limit requests after token expiration.`;
+          addLog('error', 'stream', `Expired security token in URL: t=${tParam} expired ${Math.abs(diff)}s ago`);
+        } else {
+          tokenStatus = `Token Active (${diff}s left)`;
+          tokenDetail = `• Signed token is active (expires in ${diff}s at ${new Date(tokenSec * 1000).toLocaleTimeString()}).`;
+        }
+      }
+    } catch {}
+
+    // Step B: Probe stream endpoint to retrieve real HTTP status code and server headers
+    let probedStatusCode: number | undefined;
+    let probedReason = '';
+    let probedServerMessage = '';
+
+    if (url.startsWith('http')) {
+      try {
+        const probeController = new AbortController();
+        const probeTimeout = setTimeout(() => probeController.abort(), 4000);
+        const probeUrl = `/api/stream?url=${encodeURIComponent(url)}`;
+        const probeRes = await fetch(probeUrl, {
+          signal: probeController.signal,
+          headers: { Range: 'bytes=0-1024' },
+        });
+        clearTimeout(probeTimeout);
+
+        probedStatusCode = probeRes.status;
+        const xStatus = probeRes.headers.get('X-Stream-Status');
+        if (xStatus) probedStatusCode = parseInt(xStatus, 10);
+        const xReason = probeRes.headers.get('X-Stream-Error-Reason');
+        if (xReason) probedReason = xReason;
+        const xHost = probeRes.headers.get('X-Stream-Host');
+        if (xHost) upstreamHost = xHost;
+
+        const cType = probeRes.headers.get('content-type') || '';
+        if (cType.includes('application/json')) {
+          const json = await probeRes.json().catch(() => null);
+          if (json?.error) probedServerMessage = json.error;
+        }
+      } catch {
+        // Probe aborted or network issue
+      }
+    }
+
+    // Step C: Build concise diagnosis & action based on probed findings
+    let diagnosisSummary = cleanMsg;
+    let remedyAdvice = 'Ensure the stream link is active, accessible, and points directly to playable media bytes.';
+
+    if (probedStatusCode === 429) {
+      diagnosisSummary = `HTTP 429 Too Many Requests: Remote host (${upstreamHost || 'CDN'}) rejected connection.`;
+      remedyAdvice =
+        'The remote CDN rate-limited or blocked access. This usually occurs when temporary signed tokens expire or request frequency is exceeded. Refresh the stream link on the source website.';
+      addLog(
+        'error',
+        'network',
+        `HTTP 429 Too Many Requests from ${upstreamHost || 'CDN'}: Access blocked or rate-limited.`
+      );
+    } else if (probedStatusCode === 403) {
+      diagnosisSummary = `HTTP 403 Forbidden: Remote host (${upstreamHost || 'CDN'}) denied access.`;
+      remedyAdvice =
+        'Anti-hotlinking or access protection active. The stream requires a valid authorization cookie or unexpired token.';
+      addLog('error', 'network', `HTTP 403 Forbidden from ${upstreamHost || 'CDN'}: Access denied.`);
+    } else if (probedStatusCode === 404) {
+      diagnosisSummary = `HTTP 404 Not Found: Media resource does not exist on ${upstreamHost || 'remote host'}.`;
+      remedyAdvice = 'The requested video file has been removed, renamed, or expired.';
+      addLog('error', 'network', `HTTP 404 Not Found from ${upstreamHost || 'remote host'}.`);
+    } else if (probedStatusCode && probedStatusCode >= 500) {
+      diagnosisSummary = `HTTP ${probedStatusCode} Server Error from ${upstreamHost || 'remote host'}.`;
+      remedyAdvice = 'The remote streaming server encountered an internal error or is overloaded.';
+      addLog('error', 'network', `HTTP ${probedStatusCode} from ${upstreamHost || 'remote host'}.`);
+    }
+
     const fullDiagnosticText = `[ERROR DETAILS]
 Timestamp: ${timestamp}
-Reason: ${cleanMsg}
+Reason: ${probedReason || probedServerMessage || diagnosisSummary}
+HTTP Status: ${probedStatusCode ? `HTTP ${probedStatusCode}` : 'Connection / Decode Stalled'}
 Media Code: ${errCodeName}
+Remote Host: ${upstreamHost || 'Direct File'}
 Target URL: ${url}
-Active Pipeline: ${url.startsWith('http') ? `/api/stream?url=${encodeURIComponent(url)}` : 'Direct Source'}
-Network Caching: ${preferences.networkCachingMs} ms
-Buffer Engine: WebAudio/HTML5 Demuxer
+Pipeline: ${url.startsWith('http') ? `/api/stream?url=${encodeURIComponent(url)}` : 'Direct Source'}
 
-[SUBSYSTEM TRACE]
-• Stream Demuxer: Input stream returned non-200 or unparsable container.
-• Decoder: No hardware/software decoder found for container or CORS denied.
-• Network: If this is a third-party stream, ensure the server permits CORS or provides direct streamable audio/video bytes.`;
+[DIAGNOSTIC TRACE]
+• Subsystem: Demuxer & Network Transport
+${tokenDetail ? tokenDetail + '\n' : ''}• Probe Result: ${probedServerMessage || probedReason || `Status ${probedStatusCode || 'N/A'}`}
+• Recommended Action: ${remedyAdvice}`;
 
-    addLog('error', 'decoder', `Stream connection failed: ${cleanMsg} (URL: ${url})`);
+    addLog('error', 'decoder', `Stream connection failed: ${probedReason || diagnosisSummary} (URL: ${url})`);
     setStatusText(`Error: Could not open media`);
 
     if (!preferences.suppressErrorModal) {
       setErrorModalData({
-        title: 'VLC (v0.8.6) - Stream Connection Error',
-        message: 'VLC could not decode this media stream or the remote host refused connection.',
+        title: probedStatusCode
+          ? `VLC (v3.0.21) - HTTP ${probedStatusCode} Error`
+          : 'VLC (v3.0.21) - Stream Connection Error',
+        message: probedReason || diagnosisSummary,
         details: fullDiagnosticText,
         url,
-        errorCode: mediaErr?.code || 'ERR_STREAM_FAILED',
-        errorName: errCodeName,
+        errorCode: probedStatusCode || mediaErr?.code || 'ERR_STREAM_FAILED',
+        errorName: probedStatusCode ? `HTTP_${probedStatusCode}` : errCodeName,
+        statusCode: probedStatusCode,
+        upstreamHost: upstreamHost || undefined,
+        tokenStatus: tokenStatus || undefined,
+        suggestedAction: remedyAdvice,
         timestamp,
       });
     }
@@ -695,6 +878,23 @@ Buffer Engine: WebAudio/HTML5 Demuxer
 
     setPlaylist((prev) => [newTrack, ...prev]);
     setCurrentIndex(0);
+
+    // Instantly probe exact duration and dimensions
+    if (url.startsWith('http')) {
+      fetch(`/api/media-probe?url=${encodeURIComponent(url)}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data?.success && data?.duration > 0) {
+            setDuration(data.duration);
+            newTrack.duration = data.duration;
+            if (data.width && data.height) {
+              setVideoDimensions({ width: data.width, height: data.height });
+            }
+            addLog('info', 'decoder', `Stream container probed: ${data.duration.toFixed(1)}s (${data.width}x${data.height})`);
+          }
+        })
+        .catch(() => {});
+    }
 
     if (videoRef.current) {
       const video = videoRef.current;
@@ -1003,7 +1203,7 @@ Buffer Engine: WebAudio/HTML5 Demuxer
 
       {/* 2. Main Media Screen (Video / Audio canvas) */}
       <div
-        className={`flex-1 bg-black relative flex items-center justify-center overflow-hidden ${
+        className={`flex-1 bg-black relative flex items-center justify-center overflow-hidden isolate z-10 ${
           !areControlsVisible && isPlaying ? 'cursor-none' : 'cursor-pointer'
         }`}
         onClick={() => {
@@ -1056,12 +1256,12 @@ Buffer Engine: WebAudio/HTML5 Demuxer
             </div>
           </div>
         )}
-        {/* Native HTML5 Video Element */}
+        {/* Native HTML5 Video Element with progressive Range streaming */}
         <video
           ref={videoRef}
-          src={isPlaying || isPaused || isBuffering && currentTrack?.url ? getOptimizedMediaUrl(currentTrack.url) : undefined}
+          src={currentTrack?.url ? getOptimizedMediaUrl(currentTrack.url) : undefined}
           playsInline
-          preload="auto"
+          preload="metadata"
           className={`w-full h-full object-contain ${
             currentTrack?.format === 'audio' && videoDimensions.width === 0 ? 'hidden' : 'block'
           }`}
@@ -1075,14 +1275,22 @@ Buffer Engine: WebAudio/HTML5 Demuxer
           onProgress={updateBufferedProgress}
           onDurationChange={() => {
             if (videoRef.current) {
-              setDuration(videoRef.current.duration);
-              updateBufferedProgress();
+              const d = videoRef.current.duration;
+              if (d && !isNaN(d) && isFinite(d) && d > 0) {
+                // If we already have the probed total movie duration (e.g. 3934s),
+                // do not let a temporary partial fragmented chunk (e.g. 27s) shrink it
+                setDuration((prev) => (prev > d && prev - d > 5 ? prev : Math.max(prev, d)));
+                updateBufferedProgress();
+              }
             }
           }}
           onLoadedMetadata={() => {
             if (videoRef.current) {
+              const d = videoRef.current.duration;
+              if (d && !isNaN(d) && isFinite(d) && d > 0) {
+                setDuration((prev) => (prev > d && prev - d > 5 ? prev : Math.max(prev, d)));
+              }
               const hasVideo = videoRef.current.videoWidth > 0 && videoRef.current.videoHeight > 0;
-              setDuration(videoRef.current.duration);
               setVideoDimensions({
                 width: videoRef.current.videoWidth,
                 height: videoRef.current.videoHeight,
@@ -1103,15 +1311,71 @@ Buffer Engine: WebAudio/HTML5 Demuxer
             addLog('debug', 'stream', 'Stream has buffered enough data to start playback');
           }}
           onWaiting={() => {
-            setIsBuffering(true);
-            addLog('debug', 'cache', 'Waiting for network buffer chunks...');
+            // Smooth debounce: Only display "Buffering..." if the stall exceeds 350ms
+            // This prevents rapid flickering loading screens on minor network chunk delays
+            if (!bufferDebounceRef.current && isPlaying) {
+              bufferDebounceRef.current = setTimeout(() => {
+                setIsBuffering(true);
+                addLog('debug', 'cache', 'Waiting for network buffer chunks...');
+              }, 350);
+            }
           }}
           onPlaying={() => {
+            if (bufferDebounceRef.current) {
+              clearTimeout(bufferDebounceRef.current);
+              bufferDebounceRef.current = null;
+            }
             setIsBuffering(false);
             setIsPlaying(true);
             setIsPaused(false);
           }}
           onEnded={() => {
+            if (bufferDebounceRef.current) {
+              clearTimeout(bufferDebounceRef.current);
+              bufferDebounceRef.current = null;
+            }
+
+            // Resilient Stream Protection:
+            // If the movie has a known duration and the HTTP connection ends prematurely (>15s before the end),
+            // this was an upstream network drop (e.g. after 8-9 minutes of a 1h 5m movie), NOT genuine completion.
+            const isPrematureDisconnect = duration > 0 && currentTime < duration - 15;
+            if (isPrematureDisconnect && currentTrack?.url) {
+              addLog('warn', 'stream', `Stream connection severed prematurely at ${currentTime.toFixed(1)}s of ${duration.toFixed(1)}s. Auto-reconnecting...`);
+              const total = Math.floor(currentTime);
+              const h = Math.floor(total / 3600);
+              const m = Math.floor((total % 3600) / 60);
+              const s = total % 60;
+              const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+              const timeStr = h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+              showOsd(`🔄 Reconnecting stream at ${timeStr}...`);
+              setIsBuffering(true);
+
+              const base = currentTrack.url;
+              const reconnectUrl = `/api/stream?url=${encodeURIComponent(base)}&ss=${currentTime.toFixed(1)}`;
+              if (videoRef.current) {
+                videoRef.current.src = reconnectUrl;
+                videoRef.current
+                  .play()
+                  .then(() => {
+                    setIsBuffering(false);
+                    setIsPlaying(true);
+                    setIsPaused(false);
+                    showOsd('▶ Playback Resumed');
+                    addLog('info', 'stream', `Auto-reconnect successful at ${currentTime.toFixed(1)}s`);
+                  })
+                  .catch(() => {
+                    // Retry once more after brief delay
+                    setTimeout(() => {
+                      if (videoRef.current && currentTrack) {
+                        videoRef.current.src = reconnectUrl;
+                        videoRef.current.play().catch(() => {});
+                      }
+                    }, 2000);
+                  });
+              }
+              return;
+            }
+
             addLog('info', 'playlist', 'Track finished playing');
             nextTrack();
           }}
@@ -1120,6 +1384,28 @@ Buffer Engine: WebAudio/HTML5 Demuxer
             // Suppress error if seeking/scrubbing, if user aborted, or if player is stopped/idle
             if (isScrubbingRef.current || mediaErr?.code === 1 || (!isPlaying && !isPaused && !isBuffering)) {
               return;
+            }
+
+            // Auto-recovery for network drops mid-stream
+            if (isPlaying && currentTime > 0 && currentTrack?.url && duration > 0 && currentTime < duration - 15) {
+              addLog('warn', 'stream', `Playback network error at ${currentTime.toFixed(1)}s. Attempting seamless auto-reconnect...`);
+              const base = currentTrack.url;
+              const reconnectUrl = `/api/stream?url=${encodeURIComponent(base)}&ss=${currentTime.toFixed(1)}`;
+              if (videoRef.current) {
+                videoRef.current.src = reconnectUrl;
+                videoRef.current
+                  .play()
+                  .then(() => {
+                    setIsBuffering(false);
+                    setIsPlaying(true);
+                    setIsPaused(false);
+                    showOsd('▶ Playback Restored');
+                  })
+                  .catch(() => {
+                    // fall through to standard error modal
+                  });
+                return;
+              }
             }
 
             setIsBuffering(false);
@@ -1137,17 +1423,6 @@ Buffer Engine: WebAudio/HTML5 Demuxer
                 if (cachedBlob && currentSrc !== cachedBlob) {
                   addLog('warn', 'stream', `Direct stream error, switching to memory Blob buffer: ${track.url}`);
                   videoRef.current.src = cachedBlob;
-                  videoRef.current.play().catch((e) => handlePlaybackError(e, track.url));
-                  return;
-                }
-                if (currentSrc.includes('/api/stream') || currentSrc.includes('/api/stream-proxy')) {
-                  addLog('warn', 'stream', `Proxy stream buffering, reconnecting: ${track.url}`);
-                  videoRef.current.src = `/api/stream?url=${encodeURIComponent(track.url)}&t=${Date.now()}`;
-                  videoRef.current.play().catch((e) => handlePlaybackError(e, track.url));
-                  return;
-                } else if (track.url.startsWith('http')) {
-                  addLog('warn', 'stream', `Direct stream error, routing through media proxy: ${track.url}`);
-                  videoRef.current.src = `/api/stream?url=${encodeURIComponent(track.url)}`;
                   videoRef.current.play().catch((e) => handlePlaybackError(e, track.url));
                   return;
                 }
@@ -1172,11 +1447,14 @@ Buffer Engine: WebAudio/HTML5 Demuxer
               <VlcConeIcon size={96} className="opacity-90 drop-shadow-[0_8px_16px_rgba(0,0,0,0.8)]" />
             </div>
             <div>
-              <div className="text-white/80 font-bold text-sm tracking-wide">
-                VLC media player (v0.8.6)
+              <div className="text-white/90 font-bold text-sm tracking-wide">
+                VLC media player 3.0.21 (Vetinari)
               </div>
-              <div className="text-gray-400 text-[10.5px] mt-0.5">
-                Drop audio or video files here, or use Media &gt; Open Network Stream...
+              <div className="text-amber-400 text-[10.5px] font-medium mt-0.5">
+                Cyber Café Ultimate Edition · Hardware Multi-Codec Engine
+              </div>
+              <div className="text-gray-400 text-[10px] mt-1">
+                Drop audio/video files here, or use Media &gt; Open Network Stream...
               </div>
             </div>
           </div>

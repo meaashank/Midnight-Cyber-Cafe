@@ -8,7 +8,7 @@ interface CrtEffectsProps {
 export const CrtEffects: React.FC<CrtEffectsProps> = ({ isDegaussing, scanlinesEnabled = true }) => {
   return (
     <div
-      className={`pointer-events-none fixed inset-0 z-50 w-full h-full overflow-hidden transition-all duration-300 ${
+      className={`pointer-events-none fixed inset-0 z-[2] w-full h-full overflow-hidden transition-all duration-300 ${
         isDegaussing ? 'animate-degauss' : ''
       }`}
       aria-hidden="true"

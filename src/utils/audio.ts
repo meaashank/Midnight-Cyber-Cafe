@@ -58,6 +58,42 @@ export function playCrtPowerOn() {
   }
 }
 
+// 1b. CRT Power Off Sound: Mechanical relay cut, tube discharge decay
+export function playCrtPowerOff() {
+  try {
+    const ctx = getAudioContext();
+    const now = ctx.currentTime;
+
+    // Mechanical switch pop
+    const switchOsc = ctx.createOscillator();
+    const switchGain = ctx.createGain();
+    switchOsc.type = 'square';
+    switchOsc.frequency.setValueAtTime(160, now);
+    switchOsc.frequency.exponentialRampToValueAtTime(40, now + 0.04);
+    switchGain.gain.setValueAtTime(0.35, now);
+    switchGain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+    switchOsc.connect(switchGain);
+    switchGain.connect(ctx.destination);
+    switchOsc.start(now);
+    switchOsc.stop(now + 0.04);
+
+    // High-voltage capacitor / phosphor drain descending whistle
+    const drainOsc = ctx.createOscillator();
+    const drainGain = ctx.createGain();
+    drainOsc.type = 'sine';
+    drainOsc.frequency.setValueAtTime(14500, now);
+    drainOsc.frequency.exponentialRampToValueAtTime(120, now + 0.6);
+    drainGain.gain.setValueAtTime(0.08, now);
+    drainGain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+    drainOsc.connect(drainGain);
+    drainGain.connect(ctx.destination);
+    drainOsc.start(now);
+    drainOsc.stop(now + 0.6);
+  } catch (e) {
+    console.warn('Audio play error', e);
+  }
+}
+
 // 2. CRT Degauss: Heavy deep transformer thud, oscillating metallic coil decay
 export function playCrtDegauss() {
   try {
@@ -94,118 +130,74 @@ export function playCrtDegauss() {
   }
 }
 
-// 3. Authentic 2004 Windows XP Startup Sound (Orchestral pad swell, bell chimes & Eb major chord)
+// 3. Windows XP Startup Chord (Synthesized)
 export function playWindowsStartup() {
   try {
     const ctx = getAudioContext();
-    const now = ctx.currentTime + 0.02;
+    const now = ctx.currentTime + 0.05;
 
-    // Master bus with mild warmth filter
-    const masterGain = ctx.createGain();
-    masterGain.gain.setValueAtTime(0.7, now);
-    masterGain.connect(ctx.destination);
-
-    // Reverb / Stereo spatial delay line for iconic lush tail
-    const delay = ctx.createDelay();
-    delay.delayTime.setValueAtTime(0.18, now);
-    const delayFeedback = ctx.createGain();
-    delayFeedback.gain.setValueAtTime(0.35, now);
-    const delayFilter = ctx.createBiquadFilter();
-    delayFilter.type = 'lowpass';
-    delayFilter.frequency.setValueAtTime(2400, now);
-
-    delay.connect(delayFeedback);
-    delayFeedback.connect(delayFilter);
-    delayFilter.connect(delay);
-    delayFilter.connect(masterGain);
-
-    // A. Warm Analog String Pad Swell (Eb Major)
-    const padFrequencies = [
-      { freq: 77.78, type: 'sawtooth' as OscillatorType, gain: 0.12, dur: 4.2 }, // Eb2 deep bass
-      { freq: 155.56, type: 'triangle' as OscillatorType, gain: 0.16, dur: 4.2 }, // Eb3
-      { freq: 233.08, type: 'sine' as OscillatorType, gain: 0.14, dur: 4.0 }, // Bb3
-      { freq: 311.13, type: 'triangle' as OscillatorType, gain: 0.15, dur: 4.0 }, // Eb4
-      { freq: 392.00, type: 'sine' as OscillatorType, gain: 0.12, dur: 3.8 }, // G4
-      { freq: 466.16, type: 'sine' as OscillatorType, gain: 0.10, dur: 3.6 }, // Bb4
+    const chords = [
+      { freq: 311.13, start: 0.0, dur: 1.8, gain: 0.15 }, // Eb4
+      { freq: 466.16, start: 0.2, dur: 1.8, gain: 0.15 }, // Bb4
+      { freq: 415.30, start: 0.45, dur: 2.0, gain: 0.15 }, // Ab4
+      { freq: 622.25, start: 0.8, dur: 2.4, gain: 0.18 }, // Eb5
     ];
 
-    padFrequencies.forEach(({ freq, type, gain: maxGain, dur }) => {
+    chords.forEach(({ freq, start, dur, gain: targetGain }) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      const filter = ctx.createBiquadFilter();
 
-      osc.type = type;
-      osc.frequency.setValueAtTime(freq, now);
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, now + start);
 
-      filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(350, now);
-      filter.frequency.exponentialRampToValueAtTime(1400, now + 1.2);
-      filter.frequency.exponentialRampToValueAtTime(400, now + dur);
-
-      gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.linearRampToValueAtTime(maxGain, now + 0.6);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + dur);
-
-      osc.connect(filter);
-      filter.connect(gain);
-      gain.connect(masterGain);
-      gain.connect(delay);
-
-      osc.start(now);
-      osc.stop(now + dur);
-    });
-
-    // B. Iconic Melodic Bell / Chime Arpeggio
-    const bellNotes = [
-      // Step 1: Eb4 + Eb5
-      { time: 0.0, freq: 311.13, dur: 2.2, gain: 0.22 },
-      { time: 0.0, freq: 622.25, dur: 2.0, gain: 0.18 },
-      // Step 2: Bb4 + Bb5
-      { time: 0.22, freq: 466.16, dur: 2.2, gain: 0.22 },
-      { time: 0.22, freq: 932.33, dur: 2.0, gain: 0.18 },
-      // Step 3: Ab4 + C5
-      { time: 0.44, freq: 415.30, dur: 2.4, gain: 0.24 },
-      { time: 0.44, freq: 523.25, dur: 2.4, gain: 0.19 },
-      // Step 4: Eb5 chime
-      { time: 0.72, freq: 622.25, dur: 2.6, gain: 0.26 },
-      // Step 5: Bb5 rising chime
-      { time: 0.95, freq: 932.33, dur: 2.8, gain: 0.24 },
-      // Step 6: Grand Finale Eb Major Chord
-      { time: 1.25, freq: 622.25, dur: 3.6, gain: 0.28 }, // Eb5
-      { time: 1.25, freq: 783.99, dur: 3.6, gain: 0.24 }, // G5
-      { time: 1.25, freq: 932.33, dur: 3.8, gain: 0.22 }, // Bb5
-      { time: 1.25, freq: 1244.5, dur: 4.0, gain: 0.20 }, // Eb6
-      { time: 1.25, freq: 1567.98, dur: 3.4, gain: 0.12 }, // G6 shimmer
-    ];
-
-    bellNotes.forEach(({ time, freq, dur, gain: noteGain }) => {
-      const osc = ctx.createOscillator();
-      const oscHarmonic = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, now + time);
-
-      // FM chime harmonic
-      oscHarmonic.type = 'triangle';
-      oscHarmonic.frequency.setValueAtTime(freq * 2.002, now + time); // Slight detune for Roland shimmer
-
-      gain.gain.setValueAtTime(0.0001, now + time);
-      gain.gain.linearRampToValueAtTime(noteGain, now + time + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + time + dur);
+      gain.gain.setValueAtTime(0.001, now + start);
+      gain.gain.linearRampToValueAtTime(targetGain, now + start + 0.08);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
 
       osc.connect(gain);
-      oscHarmonic.connect(gain);
-      gain.connect(masterGain);
-      gain.connect(delay);
+      gain.connect(ctx.destination);
 
-      osc.start(now + time);
-      osc.stop(now + time + dur);
-      oscHarmonic.start(now + time);
-      oscHarmonic.stop(now + time + dur);
+      osc.start(now + start);
+      osc.stop(now + start + dur);
     });
   } catch (e) {
-    console.warn('Startup sound synthesis error', e);
+    console.warn(e);
+  }
+}
+
+// 3b. Windows XP Shutdown Sound (Synthesized descending melody)
+export function playWindowsShutdown() {
+  try {
+    const ctx = getAudioContext();
+    const now = ctx.currentTime + 0.05;
+
+    // Authentic descending sequence: Eb5 -> Ab4 -> Bb4 -> Eb4
+    const chords = [
+      { freq: 622.25, start: 0.0, dur: 1.4, gain: 0.16 }, // Eb5
+      { freq: 415.30, start: 0.25, dur: 1.4, gain: 0.16 }, // Ab4
+      { freq: 466.16, start: 0.55, dur: 1.5, gain: 0.16 }, // Bb4
+      { freq: 311.13, start: 0.9, dur: 2.2, gain: 0.18 }, // Eb4
+    ];
+
+    chords.forEach(({ freq, start, dur, gain: targetGain }) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, now + start);
+
+      gain.gain.setValueAtTime(0.001, now + start);
+      gain.gain.linearRampToValueAtTime(targetGain, now + start + 0.08);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now + start);
+      osc.stop(now + start + dur);
+    });
+  } catch (e) {
+    console.warn(e);
   }
 }
 

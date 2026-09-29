@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { playCrtPowerOn, stopAmbience, stopWinampSynth } from '../utils/audio';
+import React, { useState, useEffect } from 'react';
+import { playCrtPowerOn, playCrtPowerOff, playWindowsShutdown, stopAmbience, stopWinampSynth } from '../utils/audio';
 import { Power, RotateCcw, Moon, X, Trash2 } from 'lucide-react';
 
 interface ShutdownScreenProps {
@@ -16,12 +16,33 @@ export const ShutdownScreen: React.FC<ShutdownScreenProps> = ({ onCancel, onRest
     setIsShuttingDown(true);
     stopAmbience();
     stopWinampSynth();
+    playWindowsShutdown();
 
     setTimeout(() => {
-      playCrtPowerOn(); // Relay click on turn off
+      playCrtPowerOff(); // Relay cut & tube discharge sound on turn off
       setIsTerminated(true);
-    }, 1200);
+    }, 2400);
   };
+
+  const handleRestartTerminal = () => {
+    playCrtPowerOn(); // High-voltage coil charge & relay snap on restart
+    onRestart();
+  };
+
+  // Listen for Enter or Space to restart when terminal session has ended
+  useEffect(() => {
+    if (!isTerminated) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        handleRestartTerminal();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isTerminated]);
 
   const handleClearCacheAndReset = () => {
     setIsClearingCache(true);
@@ -43,13 +64,13 @@ export const ShutdownScreen: React.FC<ShutdownScreenProps> = ({ onCancel, onRest
   if (isTerminated) {
     return (
       <div
-        onClick={onRestart}
+        onClick={handleRestartTerminal}
         className="fixed inset-0 z-50 w-full h-full bg-[#000000] flex flex-col items-center justify-center cursor-pointer select-none text-center p-6"
       >
         <div className="text-gray-600 font-mono text-[11px] uppercase tracking-widest mb-4">
           CABIN 04 — SESSION ENDED
         </div>
-        <div className="text-gray-800 font-mono text-[10px]">
+        <div className="text-gray-400 hover:text-white font-mono text-[11px] font-bold tracking-wide transition-colors">
           [ PRESS ENTER OR CLICK TO RESTART TERMINAL ]
         </div>
       </div>

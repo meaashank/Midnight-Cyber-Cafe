@@ -208,6 +208,7 @@ export default function App() {
   const [isDegaussing, setIsDegaussing] = useState(false);
   const [isBuzzing, setIsBuzzing] = useState(false);
   const [isShuttingDownModal, setIsShuttingDownModal] = useState(false);
+  const [scanlinesEnabled, setScanlinesEnabled] = useState(false);
 
   const [windows, setWindows] = useState<WindowInstance[]>(INITIAL_WINDOWS);
   const [activeWindowId, setActiveWindowId] = useState<string | null>('aim_main');
@@ -461,7 +462,13 @@ export default function App() {
         }}
       >
         {/* 1. Subtle Edge-to-Edge CRT Shaders (Curved Glass, Scanlines, Phosphor subtle glow) */}
-        <CrtEffects isDegaussing={isDegaussing} scanlinesEnabled={true} />
+        <CrtEffects
+          isDegaussing={isDegaussing}
+          scanlinesEnabled={
+            scanlinesEnabled &&
+            !windows.some((w) => w.appId === 'vlc' && w.isOpen && !w.isMinimized)
+          }
+        />
 
         {/* 2. Classic 2004 Serene Landscape Desktop Wallpaper (Edge-to-Edge Fullscreen) */}
         <div
@@ -692,6 +699,8 @@ export default function App() {
           onShowDesktop={showDesktop}
           onTriggerDegauss={triggerDegauss}
           onToggleStickyNote={addStickyNote}
+          scanlinesEnabled={scanlinesEnabled}
+          onToggleScanlines={() => setScanlinesEnabled((prev) => !prev)}
           onShutDownRequest={() => setIsShuttingDownModal(true)}
         />
 

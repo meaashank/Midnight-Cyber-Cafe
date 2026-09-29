@@ -11,7 +11,7 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onBootComplete }) => {
   const startBootSequence = () => {
     if (bootPhase !== 'off') return;
 
-    playCrtPowerOn();
+    playCrtPowerOn(); // Mechanical snap + high-voltage flyback coil charge
     setBootPhase('power_flare');
 
     // 1. CRT Flash & High-voltage flyback charge
@@ -24,16 +24,16 @@ export const BootScreen: React.FC<BootScreenProps> = ({ onBootComplete }) => {
       setBootPhase('xp_boot');
     }, 1800);
 
-    // 3. Windows XP Welcome Screen
+    // 3. Windows XP Startup Chime & Welcome
     setTimeout(() => {
       setBootPhase('welcome');
-    }, 3600);
+      playWindowsStartup();
+    }, 3800);
 
-    // 4. Reveal Desktop & Play Authentic Windows XP Startup Sound
+    // 4. Reveal Desktop
     setTimeout(() => {
       onBootComplete();
-      playWindowsStartup();
-    }, 5000);
+    }, 5600);
   };
 
   // Listen for Enter key to start

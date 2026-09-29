@@ -76,20 +76,20 @@ export const VlcControls: React.FC<VlcControlsProps> = ({
   const [isSeeking, setIsSeeking] = useState(false);
   const [seekVal, setSeekVal] = useState(0);
 
-  const formatTime = (secs: number) => {
-    if (isNaN(secs) || secs < 0) return '00:00';
+  const formatTime = (secs: number, forceHours = false) => {
+    if (isNaN(secs) || secs < 0) return forceHours ? '00:00:00' : '00:00';
     const totalSecs = Math.floor(secs);
-    const m = Math.floor(totalSecs / 60);
+    const h = Math.floor(totalSecs / 3600);
+    const m = Math.floor((totalSecs % 3600) / 60);
     const s = totalSecs % 60;
-    const h = Math.floor(m / 60);
-    const remainingM = m % 60;
     const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-    if (h > 0) {
-      return `${pad(h)}:${pad(remainingM)}:${pad(s)}`;
+    if (h > 0 || forceHours) {
+      return `${pad(h)}:${pad(m)}:${pad(s)}`;
     }
-    return `${pad(remainingM)}:${pad(s)}`;
+    return `${pad(m)}:${pad(s)}`;
   };
 
+  const hasHours = duration >= 3600;
   const effectiveTime = isSeeking ? seekVal : currentTime;
   const progressPercent = duration > 0 ? (effectiveTime / duration) * 100 : 0;
   const effectiveBuffered = Math.max(effectiveTime, bufferedEnd);
@@ -141,10 +141,10 @@ export const VlcControls: React.FC<VlcControlsProps> = ({
           title="Click to toggle elapsed / remaining time"
           className="font-mono text-[10.5px] tracking-tight shrink-0 px-1 py-0.5 bg-[#fbfbf9] border border-[#7f9db9] rounded-xs cursor-pointer text-[#002266] hover:bg-white min-w-[96px] text-center"
         >
-          {formatTime(effectiveTime)} /{' '}
+          {formatTime(effectiveTime, hasHours)} /{' '}
           {showRemaining && duration > 0
-            ? `-${formatTime(Math.max(0, duration - effectiveTime))}`
-            : formatTime(duration)}
+            ? `-${formatTime(Math.max(0, duration - effectiveTime), hasHours)}`
+            : formatTime(duration, hasHours)}
         </div>
       </div>
 
@@ -327,7 +327,7 @@ export const VlcControls: React.FC<VlcControlsProps> = ({
             <span className="truncate">{statusText || 'Ready'}</span>
           </div>
           <div className="font-mono text-[9px] text-gray-500 shrink-0">
-            {effectiveTime > 0 ? formatTime(effectiveTime) : 'VLC 0.8.6'}
+            {effectiveTime > 0 ? formatTime(effectiveTime, hasHours) : 'VLC 3.0.21'}
           </div>
         </div>
       )}

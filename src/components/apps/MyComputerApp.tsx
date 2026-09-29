@@ -127,10 +127,10 @@ table, td { border: 1px dashed #00ffff; }
           },
           {
             id: 'vlc_installer',
-            name: 'vlc-0.8.6-win32.exe',
+            name: 'vlc-3.0.21-win32.exe',
             type: 'exe',
-            size: '8.4 MB',
-            modified: '08/14/2004',
+            size: '40.8 MB',
+            modified: '08/14/2024',
           },
           {
             id: 'numb_mp3',

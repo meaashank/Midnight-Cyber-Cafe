@@ -35,30 +35,32 @@ export const VlcAboutModal: React.FC<VlcAboutModalProps> = ({ isOpen, onClose })
               <div className="text-[15px] font-bold text-[#002266]">
                 VLC media player
               </div>
-              <div className="text-[11px] font-mono text-gray-600">
-                Version 0.8.6c (Cyber Café Web Edition)
+              <div className="text-[11px] font-mono text-gray-700 font-bold">
+                Version 3.0.21 "Vetinari" (Latest Release)
               </div>
               <div className="text-[10px] text-gray-500">
-                Compiled for Midnight Cyber Café · Cabin 04
+                Cyber Café Ultimate Edition · 2004 Classic Skin + Modern Core
               </div>
             </div>
           </div>
 
           <div className="text-[10.5px] text-gray-700 space-y-2 leading-relaxed">
             <p>
-              VLC is a free and open-source cross-platform multimedia player and framework developed by the VideoLAN team.
+              VLC is a free and open-source cross-platform multimedia player and framework developed by the VideoLAN project.
             </p>
             <div className="p-2 bg-[#f4f3ee] border border-[#d4d0c8] rounded-xs text-[10px] space-y-1">
-              <div className="font-bold text-[#003399]">Platform Architecture Note:</div>
+              <div className="font-bold text-[#003399]">Core Engine & Codec Capabilities:</div>
               <p>
-                This instance runs securely inside your web browser via HTML5 Video, Audio, and Web Audio APIs. It decodes standard browser-compatible streams (MP4, WebM, OGG, MP3, WAV, H.264, AAC) directly on your device without server proxies.
+                Equipped with modern hardware-accelerated video decoding (H.264/AVC, H.265/HEVC, VP9, AV1), 32-bit float WebAudio DSP, and a real-time FFmpeg stream transmuxer with automatic disconnection recovery and zero-latency seeking.
               </p>
-              <p className="text-gray-500 text-[9.5px]">
-                Native libVLC protocols (RTSP, raw DVB, encrypted MMS, raw MPEG-2/TS) require an active transcoding backend.
-              </p>
+              <div className="flex flex-wrap gap-1 mt-1 text-[9px] font-mono text-gray-600">
+                <span className="bg-white px-1.5 py-0.5 border border-gray-300 rounded-xs">MKV / MP4 / TS / AVI / FLV</span>
+                <span className="bg-white px-1.5 py-0.5 border border-gray-300 rounded-xs">AAC / AC3 / MP3 / Opus / FLAC</span>
+                <span className="bg-white px-1.5 py-0.5 border border-gray-300 rounded-xs">Auto-Reconnect Watchdog</span>
+              </div>
             </div>
             <p className="text-[10px] text-gray-500 text-center">
-              Copyright © 1996-2006 VideoLAN and individual contributors.
+              Copyright © 1996-2024 VideoLAN and individual contributors.
             </p>
           </div>
         </div>

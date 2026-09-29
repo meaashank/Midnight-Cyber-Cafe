@@ -24,6 +24,8 @@ interface TaskbarProps {
   onShowDesktop: () => void;
   onTriggerDegauss: () => void;
   onToggleStickyNote: () => void;
+  scanlinesEnabled?: boolean;
+  onToggleScanlines?: () => void;
   onShutDownRequest: () => void;
 }
 
@@ -36,6 +38,8 @@ export const Taskbar: React.FC<TaskbarProps> = ({
   onShowDesktop,
   onTriggerDegauss,
   onToggleStickyNote,
+  scanlinesEnabled,
+  onToggleScanlines,
   onShutDownRequest,
 }) => {
   const [isStartOpen, setIsStartOpen] = useState(false);
@@ -286,6 +290,27 @@ export const Taskbar: React.FC<TaskbarProps> = ({
             <Sparkles size={11} />
             <span className="font-mono text-[9px] hidden sm:inline">DEGAUSS</span>
           </button>
+
+          {/* CRT Scanlines Toggle */}
+          {onToggleScanlines && (
+            <button
+              type="button"
+              onClick={() => {
+                playMouseClick();
+                onToggleScanlines();
+              }}
+              title={
+                scanlinesEnabled
+                  ? 'CRT Scanlines: ON (Click to turn off retro lines)'
+                  : 'CRT Scanlines: OFF (Clean screen, click to turn on retro lines)'
+              }
+              className={`p-1 hover:bg-white/20 rounded cursor-pointer flex items-center gap-0.5 text-[9px] font-mono ${
+                scanlinesEnabled ? 'text-amber-300' : 'text-gray-300 opacity-60'
+              }`}
+            >
+              <span>{scanlinesEnabled ? 'LINES: ON' : 'LINES: OFF'}</span>
+            </button>
+          )}
 
           {/* Network Flashing Icon */}
           <div className="flex items-center" title="Local Area Connection 100 Mbps (Cabin 04)">

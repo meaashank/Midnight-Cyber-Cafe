@@ -717,8 +717,96 @@ async function startServer() {
     }
   });
 
-  // API 6: Universal Media Stream Proxy for VLC media player (Instant Fast Stream + Live Remuxer)
+  // API 6: Universal Media Probe for VLC (instantly reads container duration, dimensions, codecs via ffprobe)
+  app.get('/api/media-probe', async (req, res) => {
+    const targetUrl = ((req.query.url as string) || '').trim();
+    if (!targetUrl) {
+      return res.status(400).json({ error: 'Missing url query parameter' });
+    }
+
+    try {
+      let refererHeader = '';
+      try {
+        const parsed = new URL(targetUrl);
+        refererHeader = `Referer: ${parsed.protocol}//${parsed.host}/\r\n`;
+      } catch {}
+
+      const ffprobeProc = spawn('ffprobe', [
+        '-v',
+        'error',
+        '-headers',
+        `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36\r\n${refererHeader}`,
+        '-show_entries',
+        'format=duration,size,bit_rate,format_name:stream=width,height,codec_name,codec_type',
+        '-of',
+        'json',
+        '-i',
+        targetUrl,
+      ]);
+
+      let stdout = '';
+      const timer = setTimeout(() => {
+        try {
+          ffprobeProc.kill('SIGKILL');
+        } catch {}
+      }, 6000);
+
+      ffprobeProc.stdout.on('data', (chunk) => {
+        stdout += chunk.toString();
+      });
+
+      ffprobeProc.on('close', (code) => {
+        clearTimeout(timer);
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        if (code === 0 && stdout) {
+          try {
+            const data = JSON.parse(stdout);
+            const durationSec = parseFloat(data.format?.duration || '0');
+            const videoStream = data.streams?.find((s: any) => s.codec_type === 'video');
+            const width = videoStream?.width || 0;
+            const height = videoStream?.height || 0;
+            const formatName = data.format?.format_name || '';
+
+            return res.json({
+              success: true,
+              duration: durationSec,
+              width,
+              height,
+              format: formatName,
+              bitrate: parseInt(data.format?.bit_rate || '0', 10),
+            });
+          } catch {
+            return res.json({ success: false });
+          }
+        }
+        return res.json({ success: false });
+      });
+
+      ffprobeProc.on('error', () => {
+        clearTimeout(timer);
+        if (!res.headersSent) {
+          res.json({ success: false });
+        }
+      });
+    } catch (e: any) {
+      if (!res.headersSent) {
+        res.status(500).json({ error: e?.message });
+      }
+    }
+  });
+
+  // API 7: Universal Media Stream Proxy for VLC media player (Instant Fast Stream + Live Remuxer)
   app.get(['/api/stream', '/api/stream-proxy'], async (req, res) => {
+    // Disable socket timeouts for continuous long-running media streams (prevents 8-9 minute disconnects)
+    req.socket.setTimeout(0);
+    req.socket.setKeepAlive(true, 5000);
+    req.socket.setNoDelay(true);
+    if (res.socket) {
+      res.socket.setTimeout(0);
+      res.socket.setKeepAlive(true, 5000);
+      res.socket.setNoDelay(true);
+    }
+
     const controller = new AbortController();
     let ffmpegProc: any = null;
 
@@ -748,6 +836,14 @@ async function startServer() {
         lowerUrl.includes('.ts') ||
         lowerUrl.includes('.wmv');
 
+      let upstreamHost = 'remote host';
+      let refererHeader: string | undefined;
+      try {
+        const parsed = new URL(targetUrl);
+        upstreamHost = parsed.hostname;
+        refererHeader = `${parsed.protocol}//${parsed.host}/`;
+      } catch {}
+
       // Forward browser-like headers for maximum CDN / server compatibility
       const headers: Record<string, string> = {
         'User-Agent':
@@ -755,6 +851,7 @@ async function startServer() {
         Accept: '*/*',
         'Accept-Language': 'en-US,en;q=0.9',
       };
+      if (refererHeader) headers['Referer'] = refererHeader;
       if (req.headers.range) {
         headers['Range'] = req.headers.range;
       }
@@ -770,7 +867,35 @@ async function startServer() {
       clearTimeout(timeoutId);
 
       if (!response.ok && response.status !== 206) {
-        return res.status(response.status).send(`Upstream returned ${response.status}`);
+        let failureExplanation = `Upstream host returned HTTP ${response.status} (${response.statusText || 'Error'})`;
+        if (response.status === 429) {
+          failureExplanation = `HTTP 429 Too Many Requests: Remote host (${upstreamHost}) rate-limited or blocked the connection. The temporary security token (?sign=...&t=...) may be expired or access frequency limits exceeded.`;
+        } else if (response.status === 403) {
+          failureExplanation = `HTTP 403 Forbidden: Remote host (${upstreamHost}) denied access. Anti-hotlinking protection or expired token detected.`;
+        } else if (response.status === 404) {
+          failureExplanation = `HTTP 404 Not Found: Media stream resource does not exist on ${upstreamHost}.`;
+        } else if (response.status >= 500) {
+          failureExplanation = `HTTP ${response.status} Server Error: Remote streaming server (${upstreamHost}) is temporarily down or failed to process the request.`;
+        }
+
+        console.warn(`[Stream Proxy] ${failureExplanation}`);
+
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', '*');
+        res.setHeader('Access-Control-Expose-Headers', '*');
+        res.setHeader('X-Stream-Status', String(response.status));
+        res.setHeader('X-Stream-Status-Text', response.statusText || 'Error');
+        res.setHeader('X-Stream-Host', upstreamHost);
+        res.setHeader('X-Stream-Error-Reason', failureExplanation);
+
+        return res.status(response.status).json({
+          status: response.status,
+          statusText: response.statusText,
+          host: upstreamHost,
+          error: failureExplanation,
+          url: targetUrl,
+        });
       }
 
       const rawContentType = (response.headers.get('content-type') || '').toLowerCase();
@@ -792,24 +917,66 @@ async function startServer() {
         res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', '*');
         res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('Keep-Alive', 'timeout=3600, max=1000');
         res.status(200);
         res.flushHeaders();
 
-        ffmpegProc = spawn('ffmpeg', [
+        const startOffset = Math.max(0, parseFloat((req.query.ss as string) || '0'));
+
+        const ffmpegArgs: string[] = [
+          '-hide_banner',
+          '-loglevel',
+          'error',
+          '-reconnect',
+          '1',
+          '-reconnect_at_eof',
+          '1',
+          '-reconnect_streamed',
+          '1',
+          '-reconnect_delay_max',
+          '5',
+          '-rw_timeout',
+          '15000000',
+          '-err_detect',
+          'ignore_err',
           '-headers',
-          'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36\r\n',
+          'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36\r\nAccept: */*\r\n',
+          '-analyzeduration',
+          '2000000',
+          '-probesize',
+          '2000000',
+          '-fflags',
+          '+nobuffer+fastseek+flush_packets',
+          '-flags',
+          '+low_delay',
+          '-max_delay',
+          '0',
+        ];
+
+        if (startOffset > 0) {
+          ffmpegArgs.push('-ss', String(startOffset));
+        }
+
+        ffmpegArgs.push(
           '-i',
           targetUrl,
           '-c:v',
           'copy',
           '-c:a',
           'aac',
+          '-b:a',
+          '192k',
+          '-ac',
+          '2',
           '-f',
           'mp4',
           '-movflags',
           'frag_keyframe+empty_moov+default_base_moof',
-          'pipe:1',
-        ]);
+          'pipe:1'
+        );
+
+        ffmpegProc = spawn('ffmpeg', ffmpegArgs);
 
         ffmpegProc.stdout.pipe(res);
 
@@ -817,7 +984,7 @@ async function startServer() {
           // background trace
         });
 
-        ffmpegProc.on('error', (err: any) => {
+        ffmpegProc.on('error', () => {
           if (!res.writableEnded) {
             try {
               res.end();
@@ -841,12 +1008,17 @@ async function startServer() {
       }
 
       // Standard direct streaming for MP4, WebM, MP3, OGG, etc.
-      const contentType = response.headers.get('content-type') || 'video/mp4';
+      let contentType = response.headers.get('content-type') || 'video/mp4';
+      if (contentType.includes('octet-stream') || !contentType || contentType === 'text/plain') {
+        contentType = 'video/mp4';
+      }
       res.setHeader('Content-Type', contentType);
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', '*');
       res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('Keep-Alive', 'timeout=3600, max=1000');
       res.setHeader('Cache-Control', 'public, max-age=86400');
 
       const contentLength = response.headers.get('content-length');
@@ -907,9 +1079,15 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Midnight Cyber Café Server running on http://localhost:${PORT}`);
   });
+
+  // Ensure Node HTTP server never closes long-running streaming connections prematurely
+  server.keepAliveTimeout = 0;
+  server.headersTimeout = 0;
+  server.requestTimeout = 0;
+  server.timeout = 0;
 }
 
 startServer();
