@@ -87,10 +87,13 @@ export interface YouTubeTrack {
 }
 
 export interface PlaylistItem {
-  id: string; // The YouTube playlist ID or single video ID
+  id: string; // The YouTube playlist ID/video ID or Spotify ID
   title: string;
   isCustom?: boolean;
-  type?: 'playlist' | 'video';
+  type?: 'playlist' | 'video' | 'track' | 'album' | 'artist' | 'show' | 'episode';
+  source?: 'youtube' | 'spotify';
+  embedUrl?: string;
+  canonicalUrl?: string;
   itemCount?: number;
   addedAt?: number;
 }
@@ -109,6 +112,9 @@ export interface PlaylistContextType {
   volume: number;
   spectrumBars: number[];
   eqValues: number[];
+  defaultPlaylistId: string;
+  sourceType: 'youtube' | 'spotify';
+  spotifyEmbedUrl: string | null;
   play: () => void;
   pause: () => void;
   togglePlay: () => void;
@@ -121,6 +127,7 @@ export interface PlaylistContextType {
   setEqBand: (bandIndex: number, value: number) => void;
   // Playlist Management
   loadPlaylist: (playlistId: string) => void;
+  setAsDefaultPlaylist: (playlistId: string) => void;
   addCustomPlaylist: (
     input: string,
     customTitle?: string

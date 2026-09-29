@@ -1,32 +1,60 @@
 import React, { useState } from 'react';
-import { usePlaylist, DEFAULT_PLAYLIST_ID } from './PlaylistProvider';
-import { ListMusic, Plus, Play, Trash2, RotateCcw, Youtube, Music, Sparkles, Check, AlertCircle } from 'lucide-react';
+import {
+  usePlaylist,
+  USER_SPOTIFY_PLAYLIST_ID,
+  INITIAL_DEFAULT_PLAYLIST_ID,
+} from './PlaylistProvider';
+import {
+  ListMusic,
+  Plus,
+  Play,
+  Trash2,
+  RotateCcw,
+  Youtube,
+  Music,
+  Sparkles,
+  Check,
+  AlertCircle,
+  Star,
+} from 'lucide-react';
 import { playMouseClick, playWindowsBalloon } from '../utils/audio';
 
 const CURATED_PRESETS = [
   {
-    id: DEFAULT_PLAYLIST_ID,
-    title: 'Cabin 04: Classic Gaming & Lo-Fi Chill',
-    desc: 'Default authentic 2000s PC room chillhop & OST playlist',
+    id: USER_SPOTIFY_PLAYLIST_ID,
+    title: 'Forr aashii 🎀✨️ (Spotify)',
+    desc: 'Default Spotify playlist collection with embedded interactive player',
     badge: 'DEFAULT',
+    source: 'spotify' as const,
+    embedUrl: 'https://open.spotify.com/embed/playlist/4LttUvcLoTtv3Ue54lyqkI?utm_source=generator&theme=0',
+  },
+  {
+    id: INITIAL_DEFAULT_PLAYLIST_ID,
+    title: 'Cabin 04: Classic Gaming & Lo-Fi Chill',
+    desc: 'Authentic 2000s PC room chillhop & OST playlist (YouTube)',
+    badge: 'LO-FI',
+    source: 'youtube' as const,
   },
   {
     id: 'PLMC9KNkIncKtPzgY-5rmhvj7fax8fdxoj',
     title: 'Billboard 2000s Nostalgia Hits',
-    desc: 'Classic 2000-2009 pop, rock, and alternative anthem tracks',
+    desc: 'Classic 2000-2009 pop, rock, and alternative anthem tracks (YouTube)',
     badge: '2000s HITS',
+    source: 'youtube' as const,
   },
   {
     id: 'PLOzDu-MXXLh8VO5A0HNgH_x8z6b_OqCgZ',
-    title: 'Synthwave & Retrowave 80s/90s Cyber',
-    desc: 'Nostalgic retro electronic synthesizer rhythms',
+    title: 'Synthwave & Retrowave Cyber Beats',
+    desc: 'Nostalgic retro electronic synthesizer rhythms (YouTube)',
     badge: 'SYNTH',
+    source: 'youtube' as const,
   },
   {
     id: 'PL6NdkXsTSxKhH5Vz0oA6b6B2x7V_5uJ_q',
     title: 'Lo-Fi Chill Gaming Beats',
-    desc: 'Mellow beats for late night browsing & programming',
+    desc: 'Mellow beats for late night browsing & programming (YouTube)',
     badge: 'LO-FI',
+    source: 'youtube' as const,
   },
 ];
 
@@ -35,7 +63,9 @@ export const PlaylistManagerModal: React.FC = () => {
     playlists,
     activePlaylist,
     playlistId,
+    defaultPlaylistId,
     loadPlaylist,
+    setAsDefaultPlaylist,
     addCustomPlaylist,
     removeCustomPlaylist,
     resetToDefaultPlaylist,
@@ -59,7 +89,10 @@ export const PlaylistManagerModal: React.FC = () => {
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputUrl.trim()) {
-      setFeedback({ type: 'error', message: 'Please enter a YouTube playlist URL or ID.' });
+      setFeedback({
+        type: 'error',
+        message: 'Please enter a YouTube or Spotify playlist / track URL.',
+      });
       return;
     }
 
@@ -72,14 +105,14 @@ export const PlaylistManagerModal: React.FC = () => {
         playWindowsBalloon();
         setFeedback({
           type: 'success',
-          message: `Loaded playlist: "${result.playlist?.title || 'Custom Playlist'}"`,
+          message: result.message || `Loaded playlist: "${result.playlist?.title || 'Custom Playlist'}"`,
         });
         setInputUrl('');
         setCustomTitle('');
       } else {
         setFeedback({
           type: 'error',
-          message: result.message || 'Could not load YouTube playlist. Please verify the URL.',
+          message: result.message || 'Could not load playlist. Please verify the URL or ID.',
         });
       }
     } catch {
@@ -94,12 +127,12 @@ export const PlaylistManagerModal: React.FC = () => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 select-none font-sans text-xs">
-      <div className="w-full max-w-[540px] bg-[#ece9d8] border-2 border-[#0055ea] rounded-t-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="w-full max-w-[560px] bg-[#ece9d8] border-2 border-[#0055ea] rounded-t-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Windows XP Luna Titlebar */}
         <div className="bg-gradient-to-r from-[#0055ea] via-[#2a77ff] to-[#0055ea] text-white px-3 py-1.5 flex items-center justify-between shadow-xs border-b border-[#003bb3]">
           <div className="flex items-center gap-2 font-bold tracking-wide text-[12px] drop-shadow-xs">
             <ListMusic size={15} className="text-yellow-300" />
-            <span>Playlist Manager - Winamp & YouTube Stream</span>
+            <span>Playlist Manager - Winamp, YouTube & Spotify Stream</span>
           </div>
 
           <button
@@ -114,33 +147,47 @@ export const PlaylistManagerModal: React.FC = () => {
         </div>
 
         {/* Modal Body */}
-        <div className="p-3.5 overflow-y-auto space-y-4 text-[#222]">
+        <div className="p-3.5 overflow-y-auto space-y-3 text-[#222]">
           {/* Informational Session Banner */}
-          <div className="bg-[#fffde7] border border-[#ecd97a] p-2 rounded-xs flex items-start gap-2 text-[11px] text-[#554300]">
+          <div className="bg-[#fffde7] border border-[#ecd97a] p-2.5 rounded-xs flex items-start gap-2.5 text-[11px] text-[#554300]">
             <Sparkles size={16} className="text-amber-500 shrink-0 mt-0.5" />
-            <div>
-              <span className="font-bold">Session Playlists:</span> You can paste any YouTube playlist or video URL.
-              Custom playlists stay active for your current browser tab session, while the default Cabin 04 playlist is
-              always preserved.
+            <div className="space-y-1">
+              <div>
+                <span className="font-bold">YouTube & Spotify Ready:</span> Paste any YouTube playlist/video link or Spotify playlist/album/track URL.
+              </div>
+              <div className="text-[10px] text-[#7a6400]">
+                💡 Click <span className="font-bold">⭐ Set Default</span> on any playlist to save it as your permanent starting playlist across reboots!
+              </div>
             </div>
           </div>
 
           {/* Add New Playlist Form */}
           <form onSubmit={handleAdd} className="bg-white border border-[#7f9db9] p-3 rounded-xs space-y-2.5 shadow-xs">
-            <div className="font-bold text-[11.5px] text-[#003399] flex items-center gap-1.5 border-b border-gray-200 pb-1">
-              <Plus size={13} className="text-green-600" />
-              <span>Add Custom YouTube Playlist</span>
+            <div className="font-bold text-[11.5px] text-[#003399] flex items-center justify-between border-b border-gray-200 pb-1">
+              <div className="flex items-center gap-1.5">
+                <Plus size={13} className="text-green-600" />
+                <span>Add YouTube or Spotify Playlist</span>
+              </div>
+              <div className="flex items-center gap-2 text-[10px] font-mono text-gray-500">
+                <span className="text-red-600 font-bold flex items-center gap-0.5">
+                  <Youtube size={11} /> YouTube
+                </span>
+                <span>•</span>
+                <span className="text-green-600 font-bold flex items-center gap-0.5">
+                  🟢 Spotify
+                </span>
+              </div>
             </div>
 
             <div>
               <label className="block text-[11px] font-semibold text-gray-700 mb-1">
-                YouTube Playlist / Video URL or ID:
+                Playlist / Track Link or ID:
               </label>
               <input
                 type="text"
                 value={inputUrl}
                 onChange={(e) => setInputUrl(e.target.value)}
-                placeholder="https://www.youtube.com/playlist?list=PL... or PL... or video URL"
+                placeholder="https://open.spotify.com/playlist/... OR https://youtube.com/playlist?list=..."
                 className="w-full px-2 py-1.5 bg-white border border-[#7f9db9] rounded-xs text-black font-mono text-[11px] focus:outline-hidden focus:border-[#0055ea] focus:ring-1 focus:ring-[#0055ea]"
               />
             </div>
@@ -153,7 +200,7 @@ export const PlaylistManagerModal: React.FC = () => {
                 type="text"
                 value={customTitle}
                 onChange={(e) => setCustomTitle(e.target.value)}
-                placeholder="e.g. My Favorite 2000s Gaming Tracks"
+                placeholder="e.g. My Late Night Spotify Favorites"
                 className="w-full px-2 py-1.5 bg-white border border-[#7f9db9] rounded-xs text-black text-[11px] focus:outline-hidden focus:border-[#0055ea] focus:ring-1 focus:ring-[#0055ea]"
               />
             </div>
@@ -178,19 +225,19 @@ export const PlaylistManagerModal: React.FC = () => {
                 className="px-3.5 py-1.5 bg-gradient-to-b from-[#fbfbfb] to-[#d8d4c4] hover:brightness-105 active:brightness-95 border border-[#7f9db9] rounded-xs font-bold text-[11px] text-[#003399] flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
               >
                 <Plus size={12} className="text-green-600" />
-                <span>{isSubmitting ? 'Loading Stream...' : 'Load & Play Playlist'}</span>
+                <span>{isSubmitting ? 'Importing Stream...' : 'Import & Play Playlist'}</span>
               </button>
             </div>
           </form>
 
-          {/* Active & Session Playlists List */}
+          {/* Active & Stored Playlists List */}
           <div className="bg-white border border-[#7f9db9] p-3 rounded-xs space-y-2 shadow-xs">
             <div className="flex items-center justify-between border-b border-gray-200 pb-1">
               <div className="font-bold text-[11.5px] text-[#003399] flex items-center gap-1.5">
                 <Music size={13} className="text-[#0055ea]" />
-                <span>Available Playlists ({playlists.length})</span>
+                <span>Saved Playlists ({playlists.length})</span>
               </div>
-              {playlistId !== DEFAULT_PLAYLIST_ID && (
+              {playlistId !== defaultPlaylistId && (
                 <button
                   type="button"
                   onClick={() => {
@@ -200,14 +247,17 @@ export const PlaylistManagerModal: React.FC = () => {
                   className="text-[10px] text-blue-700 hover:underline flex items-center gap-1 cursor-pointer"
                 >
                   <RotateCcw size={10} />
-                  <span>Reset to Default</span>
+                  <span>Switch to Default</span>
                 </button>
               )}
             </div>
 
-            <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
               {playlists.map((pl) => {
                 const isActive = pl.id === playlistId;
+                const isDefault = pl.id === defaultPlaylistId;
+                const isSpotify = pl.source === 'spotify' || pl.id.startsWith('spotify_');
+
                 return (
                   <div
                     key={pl.id}
@@ -233,9 +283,18 @@ export const PlaylistManagerModal: React.FC = () => {
                             ACTIVE
                           </span>
                         )}
-                        {pl.isCustom && (
-                          <span className="px-1.5 py-0.2 bg-amber-100 text-amber-800 border border-amber-300 text-[9px] font-bold rounded-xs shrink-0">
-                            CUSTOM
+                        {isDefault && (
+                          <span className="px-1.5 py-0.2 bg-amber-500 text-white text-[9px] font-bold rounded-xs shrink-0 flex items-center gap-0.5 shadow-xs">
+                            <Star size={9} fill="currentColor" /> DEFAULT
+                          </span>
+                        )}
+                        {isSpotify ? (
+                          <span className="px-1.5 py-0.2 bg-emerald-100 text-emerald-800 border border-emerald-300 text-[9px] font-bold rounded-xs shrink-0">
+                            SPOTIFY
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.2 bg-red-100 text-red-800 border border-red-300 text-[9px] font-bold rounded-xs shrink-0">
+                            YOUTUBE
                           </span>
                         )}
                       </div>
@@ -245,6 +304,27 @@ export const PlaylistManagerModal: React.FC = () => {
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">
+                      {/* Set as Default Button */}
+                      {!isDefault && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            playMouseClick();
+                            setAsDefaultPlaylist(pl.id);
+                            playWindowsBalloon();
+                            setFeedback({
+                              type: 'success',
+                              message: `Set "${pl.title}" as permanent default playlist!`,
+                            });
+                          }}
+                          className="px-1.5 py-1 bg-white hover:bg-amber-50 hover:text-amber-700 border border-gray-300 rounded-xs text-gray-600 text-[9.5px] font-bold flex items-center gap-1 cursor-pointer"
+                          title="Set as Default Starting Playlist"
+                        >
+                          <Star size={10} className="text-amber-500" />
+                          <span>Set Default</span>
+                        </button>
+                      )}
+
                       <button
                         type="button"
                         onClick={() => {
@@ -281,16 +361,21 @@ export const PlaylistManagerModal: React.FC = () => {
             </div>
           </div>
 
-          {/* Quick Presets Section */}
+          {/* Quick Curated Presets Section */}
           <div className="bg-white border border-[#7f9db9] p-3 rounded-xs space-y-2 shadow-xs">
-            <div className="font-bold text-[11.5px] text-[#003399] flex items-center gap-1.5 border-b border-gray-200 pb-1">
-              <Youtube size={13} className="text-red-600" />
-              <span>Nostalgic Curated Presets</span>
+            <div className="font-bold text-[11.5px] text-[#003399] flex items-center justify-between border-b border-gray-200 pb-1">
+              <div className="flex items-center gap-1.5">
+                <Youtube size={13} className="text-red-600" />
+                <span>Curated Nostalgic Presets</span>
+              </div>
+              <span className="text-[10px] text-gray-500">Instant 1-Click Load</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
               {CURATED_PRESETS.map((preset) => {
                 const isSelected = playlistId === preset.id;
+                const isDefault = defaultPlaylistId === preset.id;
+
                 return (
                   <button
                     key={preset.id}
@@ -307,9 +392,18 @@ export const PlaylistManagerModal: React.FC = () => {
                   >
                     <div className="flex items-center justify-between gap-1 mb-1">
                       <span className="font-bold text-[11px] text-[#111] truncate">{preset.title}</span>
-                      <span className="text-[8.5px] px-1 py-0.5 bg-gray-200 text-gray-700 rounded-xs font-mono font-bold shrink-0">
-                        {preset.badge}
-                      </span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {isDefault && <Star size={9} className="text-amber-500 fill-amber-500" />}
+                        <span
+                          className={`text-[8.5px] px-1 py-0.5 rounded-xs font-mono font-bold ${
+                            preset.source === 'spotify'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-gray-200 text-gray-700'
+                          }`}
+                        >
+                          {preset.badge}
+                        </span>
+                      </div>
                     </div>
                     <div className="text-[9.5px] text-gray-500 line-clamp-1">{preset.desc}</div>
                   </button>
@@ -321,8 +415,8 @@ export const PlaylistManagerModal: React.FC = () => {
 
         {/* Modal Footer */}
         <div className="bg-[#ece9d8] border-t border-[#d8d4c4] px-3.5 py-2 flex items-center justify-between">
-          <div className="text-[10px] text-gray-500 font-mono">
-            Press <span className="font-bold text-gray-700 bg-gray-200 px-1 py-0.5 rounded-xs">Spacebar</span> anytime to Play/Pause
+          <div className="text-[10px] text-gray-600 font-mono">
+            Press <span className="font-bold text-gray-800 bg-gray-200 px-1 py-0.5 rounded-xs">Spacebar</span> anytime to Play/Pause
           </div>
 
           <button

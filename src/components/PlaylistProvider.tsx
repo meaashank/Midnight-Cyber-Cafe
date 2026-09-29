@@ -1,19 +1,34 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { PlaylistContextType, YouTubeTrack, PlaylistItem } from '../types';
-import { parseYouTubeInput } from '../utils/youtube';
+import { parseMediaInput, fetchSpotifyMetadata } from '../utils/mediaUrlParser';
 
-export const DEFAULT_PLAYLIST_ID = 'PLt4QqxffzV0D8YNJ0Xdh34CRifqctJ8ms';
-export const DEFAULT_PLAYLIST_TITLE = 'Cabin 04: Classic Gaming & Lo-Fi Chill';
+export const USER_SPOTIFY_PLAYLIST_ID = 'spotify_4LttUvcLoTtv3Ue54lyqkI';
+export const USER_SPOTIFY_PLAYLIST_TITLE = 'Forr aashii 🎀✨️';
 
-export const DEFAULT_PLAYLIST: PlaylistItem = {
-  id: DEFAULT_PLAYLIST_ID,
-  title: DEFAULT_PLAYLIST_TITLE,
+export const USER_SPOTIFY_PLAYLIST: PlaylistItem = {
+  id: USER_SPOTIFY_PLAYLIST_ID,
+  title: USER_SPOTIFY_PLAYLIST_TITLE,
   isCustom: false,
   type: 'playlist',
+  source: 'spotify',
+  canonicalUrl: 'https://open.spotify.com/playlist/4LttUvcLoTtv3Ue54lyqkI',
+  embedUrl: 'https://open.spotify.com/embed/playlist/4LttUvcLoTtv3Ue54lyqkI?utm_source=generator&theme=0',
+};
+
+export const INITIAL_DEFAULT_PLAYLIST_ID = 'PLt4QqxffzV0D8YNJ0Xdh34CRifqctJ8ms';
+export const INITIAL_DEFAULT_PLAYLIST_TITLE = 'Cabin 04: Classic Gaming & Lo-Fi Chill';
+
+export const INITIAL_DEFAULT_PLAYLIST: PlaylistItem = {
+  id: INITIAL_DEFAULT_PLAYLIST_ID,
+  title: INITIAL_DEFAULT_PLAYLIST_TITLE,
+  isCustom: false,
+  type: 'playlist',
+  source: 'youtube',
 };
 
 const SESSION_PLAYLISTS_KEY = 'cabin04_session_playlists';
 const SESSION_ACTIVE_ID_KEY = 'cabin04_active_playlist_id';
+const STORAGE_CUSTOM_DEFAULT_ID_KEY = 'cabin04_custom_default_playlist_id';
 
 declare global {
   interface Window {
@@ -32,77 +47,86 @@ export const usePlaylist = () => {
   return context;
 };
 
-// Initial fallback track placeholders while live YouTube metadata loads
+// Initial fallback track placeholders while live metadata loads
 const INITIAL_FALLBACK_TRACKS: YouTubeTrack[] = [
   {
-    id: 'loading_1',
-    title: 'Loading Playlist Track 1...',
-    artist: 'YouTube Stream',
-    duration: '3:45',
-    durationSec: 225,
-  },
-  {
-    id: 'loading_2',
-    title: 'Loading Playlist Track 2...',
-    artist: 'YouTube Stream',
-    duration: '4:10',
-    durationSec: 250,
-  },
-  {
-    id: 'loading_3',
-    title: 'Loading Playlist Track 3...',
-    artist: 'YouTube Stream',
-    duration: '3:20',
-    durationSec: 200,
+    id: 'spotify_live',
+    title: 'Forr aashii 🎀✨️',
+    artist: 'Spotify Stream',
+    duration: 'Live',
+    durationSec: 0,
   },
 ];
 
 export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // 1. Session-based playlists list
+  // 1. User-customized default playlist ID (saved persistently in localStorage)
+  const [defaultPlaylistId, setDefaultPlaylistIdState] = useState<string>(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_CUSTOM_DEFAULT_ID_KEY);
+      if (stored) return stored;
+    } catch {
+      // ignore
+    }
+    return USER_SPOTIFY_PLAYLIST_ID;
+  });
+
+  // 2. Playlists collection
   const [playlists, setPlaylists] = useState<PlaylistItem[]>(() => {
     try {
       const stored = sessionStorage.getItem(SESSION_PLAYLISTS_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Ensure default playlist is always present
-          const hasDefault = parsed.some((p: PlaylistItem) => p.id === DEFAULT_PLAYLIST_ID);
-          return hasDefault ? parsed : [DEFAULT_PLAYLIST, ...parsed];
+          const hasSpotify = parsed.some((p: PlaylistItem) => p.id === USER_SPOTIFY_PLAYLIST_ID);
+          const hasYouTube = parsed.some((p: PlaylistItem) => p.id === INITIAL_DEFAULT_PLAYLIST_ID);
+          let list = parsed;
+          if (!hasSpotify) list = [USER_SPOTIFY_PLAYLIST, ...list];
+          if (!hasYouTube) list = [...list, INITIAL_DEFAULT_PLAYLIST];
+          return list;
         }
       }
     } catch {
       // ignore
     }
-    return [DEFAULT_PLAYLIST];
+    return [USER_SPOTIFY_PLAYLIST, INITIAL_DEFAULT_PLAYLIST];
   });
 
-  // 2. Active Playlist ID
+  // 3. Active Playlist ID
   const [playlistId, setPlaylistId] = useState<string>(() => {
     try {
       const storedActive = sessionStorage.getItem(SESSION_ACTIVE_ID_KEY);
       if (storedActive) return storedActive;
+      const customDefault = localStorage.getItem(STORAGE_CUSTOM_DEFAULT_ID_KEY);
+      if (customDefault) return customDefault;
     } catch {
       // ignore
     }
-    return DEFAULT_PLAYLIST_ID;
+    return USER_SPOTIFY_PLAYLIST_ID;
   });
 
   const [isAddPlaylistModalOpen, setIsAddPlaylistModalOpen] = useState(false);
   const [tracks, setTracks] = useState<YouTubeTrack[]>(INITIAL_FALLBACK_TRACKS);
   const [currentTrackIndex, setCurrentTrackIndex] = useState<number>(0);
-  const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isPlaying, setIsPlaying] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
   const [volume, setVolumeState] = useState<number>(80);
   const [spectrumBars, setSpectrumBars] = useState<number[]>([0, 0, 0, 0, 0, 0, 0, 0]);
   const [eqValues, setEqValues] = useState<number[]>([0, 2, 4, 1, -1, 3, 2, 0]);
 
+  // Spotify integration state
+  const [sourceType, setSourceType] = useState<'youtube' | 'spotify'>('spotify');
+  const [spotifyEmbedUrl, setSpotifyEmbedUrl] = useState<string | null>(
+    'https://open.spotify.com/embed/playlist/4LttUvcLoTtv3Ue54lyqkI?utm_source=generator&theme=0'
+  );
+
   const playerRef = useRef<any>(null);
   const animFrameRef = useRef<number | null>(null);
   const progressTimerRef = useRef<number | null>(null);
   const isApiReadyRef = useRef<boolean>(false);
   const currentVideoDataRef = useRef<{ title: string; author: string; video_id: string } | null>(null);
+  const currentTrackIndexRef = useRef<number>(0);
 
   // Sync playlists list to sessionStorage
   useEffect(() => {
@@ -122,7 +146,7 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [playlistId]);
 
-  // Helper: Fetch oEmbed metadata for a single video or track
+  // Helper: Fetch oEmbed metadata for a single YouTube video or track
   const fetchVideoMetadata = async (videoId: string): Promise<{ title: string; artist: string }> => {
     try {
       const res = await fetch(`https://noembed.com/embed?url=https://www.youtube.com/watch?v=${videoId}`);
@@ -159,7 +183,7 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setIsLoading(true);
 
     const loadedTracks: YouTubeTrack[] = [];
-    for (let i = 0; i < videoIds.length; i++) {
+    for (let i = 0; i < Math.min(videoIds.length, 50); i++) {
       const vid = videoIds[i];
       const meta = await fetchVideoMetadata(vid);
       loadedTracks.push({
@@ -258,8 +282,6 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, []);
 
-  const currentTrackIndexRef = useRef<number>(0);
-
   // Update current track info from YouTube player video data
   const syncCurrentTrackFromPlayer = useCallback(() => {
     if (!playerRef.current) return;
@@ -318,15 +340,49 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, []);
 
-  // Load a specified playlist into the player
+  // Load a specified playlist into the player (Supports YouTube & Spotify)
   const loadPlaylist = useCallback(
-    (newPlaylistId: string) => {
+    async (newPlaylistId: string) => {
       setPlaylistId(newPlaylistId);
       setIsLoading(true);
       setCurrentTrackIndex(0);
       setCurrentTime(0);
 
-      // Fetch RSS feed
+      // Check if this item is a Spotify item
+      const item = playlists.find((p) => p.id === newPlaylistId);
+      const isSpotify = item?.source === 'spotify' || newPlaylistId.startsWith('spotify_') || (item?.embedUrl && item.embedUrl.includes('spotify.com'));
+
+      if (isSpotify) {
+        setSourceType('spotify');
+        const embedUrl = item?.embedUrl || `https://open.spotify.com/embed/${item?.type || 'playlist'}/${newPlaylistId.replace('spotify_', '')}?utm_source=generator&theme=0`;
+        setSpotifyEmbedUrl(embedUrl);
+
+        // Pause YouTube player if active
+        if (playerRef.current && playerRef.current.pauseVideo) {
+          try {
+            playerRef.current.pauseVideo();
+          } catch {
+            //
+          }
+        }
+
+        setTracks([
+          {
+            id: newPlaylistId,
+            title: item?.title || 'Spotify Playlist',
+            artist: 'Spotify Stream',
+            duration: 'Live',
+            durationSec: 0,
+          },
+        ]);
+        setIsPlaying(true);
+        setIsLoading(false);
+        return;
+      }
+
+      // YouTube stream handling
+      setSourceType('youtube');
+      setSpotifyEmbedUrl(null);
       fetchPlaylistRss(newPlaylistId);
 
       if (playerRef.current && isApiReadyRef.current) {
@@ -352,42 +408,98 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
       }
     },
-    [fetchPlaylistRss, syncCurrentTrackFromPlayer]
+    [playlists, fetchPlaylistRss, syncCurrentTrackFromPlayer]
   );
 
-  // Add custom playlist from URL or ID
+  // Set any playlist as the persistent default playlist
+  const setAsDefaultPlaylist = useCallback((targetId: string) => {
+    setDefaultPlaylistIdState(targetId);
+    try {
+      localStorage.setItem(STORAGE_CUSTOM_DEFAULT_ID_KEY, targetId);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Add custom playlist from YouTube or Spotify URL / ID
   const addCustomPlaylist = useCallback(
     async (
       input: string,
       customTitle?: string
     ): Promise<{ success: boolean; message?: string; playlist?: PlaylistItem }> => {
-      const parsed = parseYouTubeInput(input);
+      const parsed = parseMediaInput(input);
       if (!parsed) {
         return {
           success: false,
-          message: 'Invalid YouTube playlist URL or ID. Please check the link and try again.',
+          message: 'Invalid URL. Please enter a valid YouTube (playlist/video) or Spotify (playlist/album/track) link.',
         };
       }
 
-      // Check if already in playlists
+      // Spotify Playlist / Album / Track handling
+      if (parsed.source === 'spotify') {
+        const spotifyKey = `spotify_${parsed.id}`;
+        const existing = playlists.find((p) => p.id === spotifyKey || p.id === parsed.id);
+        if (existing) {
+          loadPlaylist(existing.id);
+          return {
+            success: true,
+            playlist: existing,
+            message: 'Switched to existing Spotify playlist.',
+          };
+        }
+
+        let title = customTitle?.trim();
+        let author = 'Spotify';
+        let thumbnail: string | undefined;
+
+        try {
+          const meta = await fetchSpotifyMetadata(parsed.canonicalUrl || parsed.originalInput, parsed.type);
+          if (!title) title = meta.title;
+          author = meta.artist;
+          thumbnail = meta.thumbnailUrl;
+        } catch {
+          if (!title) title = `Spotify ${parsed.type.toUpperCase()} (${parsed.id.slice(0, 8)})`;
+        }
+
+        const newPlaylistItem: PlaylistItem = {
+          id: spotifyKey,
+          title: title || `Spotify ${parsed.type}`,
+          isCustom: true,
+          source: 'spotify',
+          type: parsed.type,
+          embedUrl: parsed.embedUrl,
+          canonicalUrl: parsed.canonicalUrl,
+          addedAt: Date.now(),
+        };
+
+        setPlaylists((prev) => [newPlaylistItem, ...prev]);
+        loadPlaylist(spotifyKey);
+
+        return {
+          success: true,
+          playlist: newPlaylistItem,
+          message: `Loaded Spotify ${parsed.type}: "${newPlaylistItem.title}"`,
+        };
+      }
+
+      // YouTube Playlist / Video handling
       const existing = playlists.find((p) => p.id === parsed.id);
       if (existing) {
         loadPlaylist(existing.id);
         return {
           success: true,
           playlist: existing,
-          message: 'Switched to existing playlist.',
+          message: 'Switched to existing YouTube playlist.',
         };
       }
 
-      // Determine friendly title
       let title = customTitle?.trim();
       if (!title) {
         if (parsed.type === 'video') {
           const meta = await fetchVideoMetadata(parsed.id);
           title = `${meta.artist} - ${meta.title}`;
         } else {
-          title = `Custom Playlist (${parsed.id.slice(0, 8)}...)`;
+          title = `YouTube Playlist (${parsed.id.slice(0, 8)}...)`;
         }
       }
 
@@ -395,6 +507,7 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         id: parsed.id,
         title,
         isCustom: true,
+        source: 'youtube',
         type: parsed.type,
         addedAt: Date.now(),
       };
@@ -413,21 +526,31 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Remove custom playlist
   const removeCustomPlaylist = useCallback(
     (idToRemove: string) => {
-      if (idToRemove === DEFAULT_PLAYLIST_ID) return; // Prevent removing default
+      if (idToRemove === INITIAL_DEFAULT_PLAYLIST_ID) return; // Prevent removing factory default
 
       setPlaylists((prev) => prev.filter((p) => p.id !== idToRemove));
 
+      // If removing the currently chosen default, reset default to factory
+      if (defaultPlaylistId === idToRemove) {
+        setDefaultPlaylistIdState(INITIAL_DEFAULT_PLAYLIST_ID);
+        try {
+          localStorage.removeItem(STORAGE_CUSTOM_DEFAULT_ID_KEY);
+        } catch {
+          // ignore
+        }
+      }
+
       if (playlistId === idToRemove) {
-        loadPlaylist(DEFAULT_PLAYLIST_ID);
+        loadPlaylist(INITIAL_DEFAULT_PLAYLIST_ID);
       }
     },
-    [playlistId, loadPlaylist]
+    [defaultPlaylistId, playlistId, loadPlaylist]
   );
 
   // Reset to default playlist
   const resetToDefaultPlaylist = useCallback(() => {
-    loadPlaylist(DEFAULT_PLAYLIST_ID);
-  }, [loadPlaylist]);
+    loadPlaylist(defaultPlaylistId || INITIAL_DEFAULT_PLAYLIST_ID);
+  }, [defaultPlaylistId, loadPlaylist]);
 
   // Initialize YouTube Iframe Player
   useEffect(() => {
@@ -591,7 +714,7 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Periodic polling for player time sync
   useEffect(() => {
-    if (isPlaying) {
+    if (isPlaying && sourceType === 'youtube') {
       progressTimerRef.current = window.setInterval(() => {
         if (playerRef.current && playerRef.current.getCurrentTime) {
           try {
@@ -618,10 +741,14 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         progressTimerRef.current = null;
       }
     };
-  }, [isPlaying, syncCurrentTrackFromPlayer]);
+  }, [isPlaying, sourceType, syncCurrentTrackFromPlayer]);
 
   // Transport control methods
   const play = useCallback(() => {
+    if (sourceType === 'spotify') {
+      setIsPlaying(true);
+      return;
+    }
     if (playerRef.current && playerRef.current.playVideo) {
       try {
         playerRef.current.playVideo();
@@ -630,9 +757,13 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         console.warn('Play error:', e);
       }
     }
-  }, []);
+  }, [sourceType]);
 
   const pause = useCallback(() => {
+    if (sourceType === 'spotify') {
+      setIsPlaying(false);
+      return;
+    }
     if (playerRef.current && playerRef.current.pauseVideo) {
       try {
         playerRef.current.pauseVideo();
@@ -641,7 +772,7 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         console.warn('Pause error:', e);
       }
     }
-  }, []);
+  }, [sourceType]);
 
   const togglePlay = useCallback(() => {
     if (isPlaying) {
@@ -651,7 +782,7 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [isPlaying, play, pause]);
 
-  // Global Spacebar Hotkey: Pressing Space toggles Play/Pause for YouTube & Winamp in sync
+  // Global Spacebar Hotkey: Pressing Space toggles Play/Pause for stream in sync
   useEffect(() => {
     const handleGlobalSpaceHotkey = (e: KeyboardEvent) => {
       if (e.code === 'Space' || e.key === ' ') {
@@ -679,6 +810,11 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [togglePlay]);
 
   const stop = useCallback(() => {
+    if (sourceType === 'spotify') {
+      setIsPlaying(false);
+      setCurrentTime(0);
+      return;
+    }
     if (playerRef.current && playerRef.current.stopVideo) {
       try {
         playerRef.current.stopVideo();
@@ -688,9 +824,10 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         console.warn('Stop error:', e);
       }
     }
-  }, []);
+  }, [sourceType]);
 
   const nextTrack = useCallback(() => {
+    if (sourceType === 'spotify') return;
     if (playerRef.current && playerRef.current.nextVideo) {
       try {
         playerRef.current.nextVideo();
@@ -702,9 +839,10 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const nextIdx = (currentTrackIndex + 1) % tracks.length;
       setCurrentTrackIndex(nextIdx);
     }
-  }, [currentTrackIndex, syncCurrentTrackFromPlayer, tracks.length]);
+  }, [sourceType, currentTrackIndex, syncCurrentTrackFromPlayer, tracks.length]);
 
   const prevTrack = useCallback(() => {
+    if (sourceType === 'spotify') return;
     if (playerRef.current && playerRef.current.previousVideo) {
       try {
         playerRef.current.previousVideo();
@@ -716,12 +854,12 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const prevIdx = (currentTrackIndex - 1 + tracks.length) % tracks.length;
       setCurrentTrackIndex(prevIdx);
     }
-  }, [currentTrackIndex, syncCurrentTrackFromPlayer, tracks.length]);
+  }, [sourceType, currentTrackIndex, syncCurrentTrackFromPlayer, tracks.length]);
 
   const selectTrack = useCallback(
     (index: number) => {
       setCurrentTrackIndex(index);
-      if (playerRef.current && playerRef.current.playVideoAt) {
+      if (sourceType === 'youtube' && playerRef.current && playerRef.current.playVideoAt) {
         try {
           playerRef.current.playVideoAt(index);
           setIsPlaying(true);
@@ -731,30 +869,36 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
       }
     },
-    [syncCurrentTrackFromPlayer]
+    [sourceType, syncCurrentTrackFromPlayer]
   );
 
-  const setVolume = useCallback((vol: number) => {
-    setVolumeState(vol);
-    if (playerRef.current && playerRef.current.setVolume) {
-      try {
-        playerRef.current.setVolume(vol);
-      } catch (e) {
-        console.warn('Set volume error:', e);
+  const setVolume = useCallback(
+    (vol: number) => {
+      setVolumeState(vol);
+      if (sourceType === 'youtube' && playerRef.current && playerRef.current.setVolume) {
+        try {
+          playerRef.current.setVolume(vol);
+        } catch (e) {
+          console.warn('Set volume error:', e);
+        }
       }
-    }
-  }, []);
+    },
+    [sourceType]
+  );
 
-  const seekTo = useCallback((seconds: number) => {
-    if (playerRef.current && playerRef.current.seekTo) {
-      try {
-        playerRef.current.seekTo(seconds, true);
-        setCurrentTime(seconds);
-      } catch (e) {
-        console.warn('Seek error:', e);
+  const seekTo = useCallback(
+    (seconds: number) => {
+      if (sourceType === 'youtube' && playerRef.current && playerRef.current.seekTo) {
+        try {
+          playerRef.current.seekTo(seconds, true);
+          setCurrentTime(seconds);
+        } catch (e) {
+          console.warn('Seek error:', e);
+        }
       }
-    }
-  }, []);
+    },
+    [sourceType]
+  );
 
   const setEqBand = useCallback((bandIndex: number, value: number) => {
     setEqValues((prev) => {
@@ -767,8 +911,14 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const activePlaylist: PlaylistItem =
     playlists.find((p) => p.id === playlistId) || {
       id: playlistId,
-      title: playlistId === DEFAULT_PLAYLIST_ID ? DEFAULT_PLAYLIST_TITLE : 'Custom YouTube Playlist',
-      isCustom: playlistId !== DEFAULT_PLAYLIST_ID,
+      title:
+        playlistId === INITIAL_DEFAULT_PLAYLIST_ID
+          ? INITIAL_DEFAULT_PLAYLIST_TITLE
+          : playlistId.startsWith('spotify_')
+          ? 'Custom Spotify Playlist'
+          : 'Custom YouTube Playlist',
+      isCustom: playlistId !== INITIAL_DEFAULT_PLAYLIST_ID,
+      source: playlistId.startsWith('spotify_') ? 'spotify' : 'youtube',
     };
 
   const currentTrack = tracks[currentTrackIndex] || tracks[0] || null;
@@ -787,6 +937,9 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     volume,
     spectrumBars,
     eqValues,
+    defaultPlaylistId,
+    sourceType,
+    spotifyEmbedUrl,
     play,
     pause,
     togglePlay,
@@ -798,6 +951,7 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     seekTo,
     setEqBand,
     loadPlaylist,
+    setAsDefaultPlaylist,
     addCustomPlaylist,
     removeCustomPlaylist,
     resetToDefaultPlaylist,

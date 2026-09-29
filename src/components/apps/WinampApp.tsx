@@ -1,7 +1,22 @@
 import React, { useState } from 'react';
 import { usePlaylist } from '../PlaylistProvider';
-import { Play, Pause, Square, SkipBack, SkipForward, Volume2, Disc, ListMusic, Plus, Settings2 } from 'lucide-react';
-import { playMouseClick } from '../../utils/audio';
+import {
+  Play,
+  Pause,
+  Square,
+  SkipBack,
+  SkipForward,
+  Volume2,
+  Disc,
+  ListMusic,
+  Plus,
+  Settings2,
+  Star,
+  Youtube,
+  Radio,
+  ExternalLink,
+} from 'lucide-react';
+import { playMouseClick, playWindowsBalloon } from '../../utils/audio';
 
 export const WinampApp: React.FC = () => {
   const {
@@ -27,12 +42,17 @@ export const WinampApp: React.FC = () => {
     playlistId,
     playlists,
     activePlaylist,
+    defaultPlaylistId,
+    sourceType,
+    spotifyEmbedUrl,
     loadPlaylist,
+    setAsDefaultPlaylist,
     setIsAddPlaylistModalOpen,
   } = usePlaylist();
 
   const [showPlaylist, setShowPlaylist] = useState(true);
   const [showEq, setShowEq] = useState(false);
+  const [showSpotifyEmbed, setShowSpotifyEmbed] = useState(true);
 
   // Format seconds to mm:ss
   const formatTime = (secs: number) => {
@@ -67,6 +87,9 @@ export const WinampApp: React.FC = () => {
     prevTrack();
   };
 
+  const isCurrentDefault = playlistId === defaultPlaylistId;
+  const isSpotify = sourceType === 'spotify' || activePlaylist.source === 'spotify' || playlistId.startsWith('spotify_');
+
   return (
     <div className="w-full h-full bg-[#1b1c20] text-[#00ff00] font-mono text-[10px] flex flex-col p-1.5 select-none overflow-y-auto">
       {/* Winamp Main Player Head Unit */}
@@ -86,18 +109,30 @@ export const WinampApp: React.FC = () => {
 
           {/* Marquee Track Title Display */}
           <div className="flex-1 px-2 overflow-hidden">
-            <div className="text-[#00ff44] text-[11px] font-pixel truncate tracking-wider">
-              {isPlaying
-                ? `▶ ${currentTrackIndex + 1}. ${currentTrack?.artist || 'Unknown'} - ${currentTrack?.title || 'Track'}`
-                : isLoading
-                ? `⌛ CONNECTING TO [${activePlaylist.title.toUpperCase()}]...`
-                : `❚❚ WINAMP 2.91 - [${currentTrackIndex + 1}/${tracks.length}] ${currentTrack?.title || 'IDLE'}`}
+            <div className="text-[#00ff44] text-[11px] font-pixel truncate tracking-wider flex items-center gap-1.5">
+              {isSpotify ? (
+                <span className="text-emerald-400 font-bold">🟢 [SPOTIFY]</span>
+              ) : (
+                <span className="text-red-400 font-bold">🔴 [YOUTUBE]</span>
+              )}
+              <span className="truncate">
+                {isPlaying
+                  ? `▶ ${currentTrackIndex + 1}. ${currentTrack?.artist || 'Unknown'} - ${currentTrack?.title || 'Track'}`
+                  : isLoading
+                  ? `⌛ CONNECTING TO [${activePlaylist.title.toUpperCase()}]...`
+                  : `❚❚ WINAMP 2.91 - [${currentTrackIndex + 1}/${tracks.length}] ${currentTrack?.title || 'IDLE'}`}
+              </span>
             </div>
             <div className="flex justify-between text-[9px] text-[#00cc33] font-pixel mt-0.5">
-              <span className="truncate max-w-[140px] text-gray-400">{activePlaylist.title}</span>
-              <span className="text-yellow-400 font-bold">{isPlaying ? 'STEREO LIVE' : isLoading ? 'BUFFERING' : 'IDLE'}</span>
+              <span className="truncate max-w-[140px] text-gray-400 flex items-center gap-1">
+                {isCurrentDefault && <Star size={8} className="text-amber-400 fill-amber-400 shrink-0" />}
+                <span className="truncate">{activePlaylist.title}</span>
+              </span>
+              <span className="text-yellow-400 font-bold">
+                {isSpotify ? 'SPOTIFY STREAM' : isPlaying ? 'STEREO LIVE' : isLoading ? 'BUFFERING' : 'IDLE'}
+              </span>
               <span>
-                {formatTime(currentTime)} / {duration > 0 ? formatTime(duration) : currentTrack?.duration || '3:30'}
+                {formatTime(currentTime)} / {duration > 0 ? formatTime(duration) : currentTrack?.duration || (isSpotify ? 'LIVE' : '3:30')}
               </span>
             </div>
           </div>
@@ -110,8 +145,11 @@ export const WinampApp: React.FC = () => {
             min="0"
             max={duration || 100}
             value={currentTime || 0}
+            disabled={isSpotify}
             onChange={(e) => seekTo(Number(e.target.value))}
-            className="w-full h-1.5 bg-[#0a0a0a] accent-[#00ff44] rounded cursor-pointer"
+            className={`w-full h-1.5 bg-[#0a0a0a] accent-[#00ff44] rounded ${
+              isSpotify ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'
+            }`}
           />
         </div>
 
@@ -122,8 +160,9 @@ export const WinampApp: React.FC = () => {
             <button
               type="button"
               onClick={handlePrev}
+              disabled={isSpotify}
               title="Previous Track"
-              className="p-1.5 bg-gradient-to-b from-[#555b66] to-[#2b2e34] hover:brightness-125 active:brightness-75 border border-white/30 rounded-xs text-white cursor-pointer shadow-xs"
+              className="p-1.5 bg-gradient-to-b from-[#555b66] to-[#2b2e34] hover:brightness-125 active:brightness-75 border border-white/30 rounded-xs text-white cursor-pointer shadow-xs disabled:opacity-40"
             >
               <SkipBack size={10} />
             </button>
@@ -156,8 +195,9 @@ export const WinampApp: React.FC = () => {
             <button
               type="button"
               onClick={handleNext}
+              disabled={isSpotify}
               title="Next Track"
-              className="p-1.5 bg-gradient-to-b from-[#555b66] to-[#2b2e34] hover:brightness-125 active:brightness-75 border border-white/30 rounded-xs text-white cursor-pointer shadow-xs"
+              className="p-1.5 bg-gradient-to-b from-[#555b66] to-[#2b2e34] hover:brightness-125 active:brightness-75 border border-white/30 rounded-xs text-white cursor-pointer shadow-xs disabled:opacity-40"
             >
               <SkipForward size={10} />
             </button>
@@ -231,7 +271,40 @@ export const WinampApp: React.FC = () => {
         </div>
       )}
 
-      {/* Dynamic YouTube Playlist Drawer */}
+      {/* Spotify Embedded Live Player Integration (If Spotify active) */}
+      {isSpotify && spotifyEmbedUrl && showSpotifyEmbed && (
+        <div className="mt-1 bg-[#000000] border border-[#1db954] rounded-xs p-1 shadow-lg">
+          <div className="flex items-center justify-between pb-1 px-1 text-[9px] text-emerald-400 font-pixel">
+            <span className="flex items-center gap-1 font-bold">
+              🟢 SPOTIFY EMBEDDED CONSOLE
+            </span>
+            <div className="flex items-center gap-2">
+              <a
+                href={activePlaylist.canonicalUrl || `https://open.spotify.com/playlist/${playlistId.replace('spotify_', '')}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-gray-400 hover:text-white flex items-center gap-0.5 text-[8.5px]"
+              >
+                <span>OPEN IN SPOTIFY</span>
+                <ExternalLink size={8} />
+              </a>
+            </div>
+          </div>
+          <div className="w-full rounded-xs overflow-hidden bg-black">
+            <iframe
+              src={spotifyEmbedUrl}
+              width="100%"
+              height="152"
+              title="Spotify Winamp Integration"
+              allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+              loading="lazy"
+              className="border-0 rounded-xs"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Dynamic YouTube / Spotify Playlist Drawer */}
       {showPlaylist && (
         <div className="mt-1 flex-1 bg-[#000000] border border-[#3a3f47] p-1.5 rounded-xs flex flex-col justify-between">
           {/* Playlist Top Toolbar */}
@@ -239,20 +312,46 @@ export const WinampApp: React.FC = () => {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 truncate">
                 <ListMusic size={11} className="text-yellow-400 shrink-0" />
-                <span className="truncate font-bold">PLAYLIST: {activePlaylist.title.toUpperCase()}</span>
+                <span className="truncate font-bold">
+                  {isSpotify ? 'SPOTIFY:' : 'YOUTUBE:'} {activePlaylist.title.toUpperCase()}
+                </span>
+                {isCurrentDefault && (
+                  <span className="px-1 py-0.2 bg-amber-500 text-black text-[8px] font-bold rounded-xs shrink-0 flex items-center gap-0.5">
+                    <Star size={7} fill="currentColor" /> DEFAULT
+                  </span>
+                )}
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  playMouseClick();
-                  setIsAddPlaylistModalOpen(true);
-                }}
-                className="px-1.5 py-0.5 bg-[#2b2e34] hover:bg-[#3d424b] text-yellow-300 border border-yellow-600 rounded-xs flex items-center gap-1 text-[8.5px] font-bold cursor-pointer shrink-0"
-                title="Add / Switch Playlists"
-              >
-                <Plus size={9} />
-                <span>+ ADD / MANAGE PL</span>
-              </button>
+
+              <div className="flex items-center gap-1 shrink-0">
+                {!isCurrentDefault && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playMouseClick();
+                      setAsDefaultPlaylist(playlistId);
+                      playWindowsBalloon();
+                    }}
+                    className="px-1.5 py-0.5 bg-[#2b2e34] hover:bg-amber-900 text-amber-300 border border-amber-600 rounded-xs flex items-center gap-0.5 text-[8.5px] font-bold cursor-pointer"
+                    title="Set this playlist as permanent default"
+                  >
+                    <Star size={8} className="text-amber-400" />
+                    <span>SET DEFAULT</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    playMouseClick();
+                    setIsAddPlaylistModalOpen(true);
+                  }}
+                  className="px-1.5 py-0.5 bg-[#2b2e34] hover:bg-[#3d424b] text-yellow-300 border border-yellow-600 rounded-xs flex items-center gap-1 text-[8.5px] font-bold cursor-pointer"
+                  title="Add / Switch Playlists"
+                >
+                  <Plus size={9} />
+                  <span>+ MANAGE PL</span>
+                </button>
+              </div>
             </div>
 
             {/* Playlist Quick Switcher Dropdown */}
@@ -269,7 +368,8 @@ export const WinampApp: React.FC = () => {
                 >
                   {playlists.map((pl) => (
                     <option key={pl.id} value={pl.id}>
-                      {pl.title} {pl.isCustom ? '(Custom)' : ''}
+                      {pl.source === 'spotify' || pl.id.startsWith('spotify_') ? '🟢 [Spotify]' : '🔴 [YouTube]'}{' '}
+                      {pl.title} {pl.id === defaultPlaylistId ? '★ (Default)' : ''}
                     </option>
                   ))}
                 </select>
@@ -278,7 +378,7 @@ export const WinampApp: React.FC = () => {
           </div>
 
           {/* Songs List */}
-          <div className="space-y-0.5 overflow-y-auto max-h-48 divide-y divide-[#151515]">
+          <div className="space-y-0.5 overflow-y-auto max-h-44 divide-y divide-[#151515]">
             {tracks.map((track, idx) => (
               <div
                 key={`${track.id}_${idx}`}
@@ -336,7 +436,7 @@ export const WinampApp: React.FC = () => {
             </div>
             <div className="flex items-center gap-1 text-[#00ff44]">
               <Disc size={10} className={isPlaying ? 'animate-spin' : ''} />
-              <span>{tracks.length} TRACKS</span>
+              <span>{isSpotify ? 'SPOTIFY' : `${tracks.length} TRACKS`}</span>
             </div>
           </div>
         </div>
