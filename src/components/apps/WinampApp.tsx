@@ -444,6 +444,10 @@ export const WinampApp: React.FC = () => {
               />
             )}
           </div>
+          <div className="mt-1 px-1 text-[8px] text-gray-400 font-mono flex items-center justify-between border-t border-[#222] pt-1">
+            <span>💡 Spotify embeds play 30s previews unless logged in.</span>
+            <span className="text-emerald-400">Log in inside Spotify embed for full tracks</span>
+          </div>
         </div>
       )}
 

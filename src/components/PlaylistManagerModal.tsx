@@ -156,7 +156,7 @@ export const PlaylistManagerModal: React.FC = () => {
                 <span className="font-bold">YouTube & Spotify Ready:</span> Paste any YouTube playlist/video link or Spotify playlist/album/track URL.
               </div>
               <div className="text-[10px] text-[#7a6400]">
-                💡 Click <span className="font-bold">⭐ Set Default</span> on any playlist to save it as your permanent starting playlist across reboots!
+                💡 <span className="font-bold">Spotify 30-Second Previews:</span> Spotify restricts embedded web players to 30s preview clips unless you log into your Spotify account in the embed. For 100% full-length playback without logging in, use YouTube playlists!
               </div>
             </div>
           </div>
