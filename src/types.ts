@@ -116,8 +116,14 @@ export interface PlaylistContextType {
   defaultPlaylistId: string;
   sourceType: 'youtube' | 'spotify';
   spotifyEmbedUrl: string | null;
-  spotifyController?: any;
-  setSpotifyController?: (controller: any) => void;
+  registerSpotifyController?: (methods: {
+    resume: () => void;
+    play: () => void;
+    pause: () => void;
+    togglePlay: () => void;
+    seek?: (seconds: number) => void;
+    loadUri?: (uri: string) => void;
+  } | null) => void;
   play: () => void;
   pause: () => void;
   togglePlay: () => void;

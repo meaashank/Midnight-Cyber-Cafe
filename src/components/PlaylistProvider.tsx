@@ -124,8 +124,16 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [spotifyEmbedUrl, setSpotifyEmbedUrl] = useState<string | null>(
     'https://open.spotify.com/embed/playlist/4LttUvcLoTtv3Ue54lyqkI?utm_source=generator&theme=0'
   );
-  const [spotifyController, setSpotifyControllerState] = useState<any>(null);
-  const spotifyControllerRef = useRef<any>(null);
+  
+  // Keep only pure functions in ref (never store circular DOM elements or Fiber nodes)
+  const spotifyMethodsRef = useRef<{
+    resume: () => void;
+    play: () => void;
+    pause: () => void;
+    togglePlay: () => void;
+    seek?: (seconds: number) => void;
+    loadUri?: (uri: string) => void;
+  } | null>(null);
 
   const playerRef = useRef<any>(null);
   const animFrameRef = useRef<number | null>(null);
@@ -134,10 +142,20 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const currentVideoDataRef = useRef<{ title: string; author: string; video_id: string } | null>(null);
   const currentTrackIndexRef = useRef<number>(0);
 
-  // Sync playlists list to sessionStorage
+  // Sync playlists list to sessionStorage safely without circular references
   useEffect(() => {
     try {
-      sessionStorage.setItem(SESSION_PLAYLISTS_KEY, JSON.stringify(playlists));
+      const sanitized = playlists.map((p) => ({
+        id: String(p.id || ''),
+        title: String(p.title || ''),
+        isCustom: Boolean(p.isCustom),
+        type: p.type || 'playlist',
+        source: p.source || 'youtube',
+        embedUrl: p.embedUrl ? String(p.embedUrl) : undefined,
+        canonicalUrl: p.canonicalUrl ? String(p.canonicalUrl) : undefined,
+        spotifyUri: p.spotifyUri ? String(p.spotifyUri) : undefined,
+      }));
+      sessionStorage.setItem(SESSION_PLAYLISTS_KEY, JSON.stringify(sanitized));
     } catch {
       // ignore
     }
@@ -146,18 +164,28 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Sync active playlist ID to sessionStorage
   useEffect(() => {
     try {
-      sessionStorage.setItem(SESSION_ACTIVE_ID_KEY, playlistId);
+      sessionStorage.setItem(SESSION_ACTIVE_ID_KEY, String(playlistId));
     } catch {
       // ignore
     }
   }, [playlistId]);
 
-  // Expose controller setter
-  const setSpotifyController = useCallback((ctrl: any) => {
-    spotifyControllerRef.current = ctrl;
-    setSpotifyControllerState(ctrl);
-    window.spotifyEmbedController = ctrl;
-  }, []);
+  // Expose clean controller registrar (function wrappers only)
+  const registerSpotifyController = useCallback(
+    (
+      methods: {
+        resume: () => void;
+        play: () => void;
+        pause: () => void;
+        togglePlay: () => void;
+        seek?: (seconds: number) => void;
+        loadUri?: (uri: string) => void;
+      } | null
+    ) => {
+      spotifyMethodsRef.current = methods;
+    },
+    []
+  );
 
   // PostMessage broadcaster to any Spotify iframes
   const sendSpotifyCommand = useCallback((cmd: 'toggle' | 'play' | 'pause' | 'resume') => {
@@ -167,8 +195,6 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         try {
           frame.contentWindow?.postMessage({ command: cmd }, '*');
           frame.contentWindow?.postMessage({ type: 'command', command: cmd }, '*');
-          frame.contentWindow?.postMessage(JSON.stringify({ command: cmd }), '*');
-          frame.contentWindow?.postMessage(JSON.stringify({ type: 'command', command: cmd }), '*');
         } catch {
           // ignore cross-origin security errors
         }
@@ -450,7 +476,7 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const uri =
           item?.spotifyUri ||
           `spotify:${item?.type || 'playlist'}:${newPlaylistId.replace('spotify_', '')}`;
-        const ctrl = spotifyControllerRef.current || window.spotifyEmbedController;
+        const ctrl = spotifyMethodsRef.current;
         if (ctrl?.loadUri) {
           try {
             ctrl.loadUri(uri);
@@ -843,7 +869,7 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const play = useCallback(() => {
     if (sourceType === 'spotify') {
       setIsPlaying(true);
-      const ctrl = spotifyControllerRef.current || window.spotifyEmbedController;
+      const ctrl = spotifyMethodsRef.current;
       if (ctrl) {
         try {
           if (typeof ctrl.resume === 'function') {
@@ -875,7 +901,7 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const pause = useCallback(() => {
     if (sourceType === 'spotify') {
       setIsPlaying(false);
-      const ctrl = spotifyControllerRef.current || window.spotifyEmbedController;
+      const ctrl = spotifyMethodsRef.current;
       if (ctrl) {
         try {
           if (typeof ctrl.pause === 'function') {
@@ -903,7 +929,7 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const togglePlay = useCallback(() => {
     if (sourceType === 'spotify') {
-      const ctrl = spotifyControllerRef.current || window.spotifyEmbedController;
+      const ctrl = spotifyMethodsRef.current;
       if (ctrl) {
         try {
           if (typeof ctrl.togglePlay === 'function') {
@@ -959,7 +985,7 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (sourceType === 'spotify') {
       setIsPlaying(false);
       setCurrentTime(0);
-      const ctrl = spotifyControllerRef.current || window.spotifyEmbedController;
+      const ctrl = spotifyMethodsRef.current;
       if (ctrl) {
         try {
           ctrl.pause?.();
@@ -1045,7 +1071,7 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const seekTo = useCallback(
     (seconds: number) => {
       if (sourceType === 'spotify') {
-        const ctrl = spotifyControllerRef.current || window.spotifyEmbedController;
+        const ctrl = spotifyMethodsRef.current;
         if (ctrl?.seek) {
           try {
             ctrl.seek(seconds);
@@ -1110,8 +1136,7 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     defaultPlaylistId,
     sourceType,
     spotifyEmbedUrl,
-    spotifyController,
-    setSpotifyController,
+    registerSpotifyController,
     play,
     pause,
     togglePlay,

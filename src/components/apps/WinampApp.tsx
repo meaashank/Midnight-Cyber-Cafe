@@ -43,7 +43,7 @@ export const WinampApp: React.FC = () => {
     defaultPlaylistId,
     sourceType,
     spotifyEmbedUrl,
-    setSpotifyController,
+    registerSpotifyController,
     loadPlaylist,
     setAsDefaultPlaylist,
     setIsAddPlaylistModalOpen,
@@ -56,6 +56,7 @@ export const WinampApp: React.FC = () => {
 
   const spotifyHostRef = useRef<HTMLDivElement>(null);
   const isControllerInitializedRef = useRef(false);
+  const controllerRef = useRef<any>(null);
 
   // Format seconds to mm:ss
   const formatTime = (secs: number) => {
@@ -95,15 +96,33 @@ export const WinampApp: React.FC = () => {
         IFrameAPI.createController(hostEl, options, (controller: any) => {
           if (!isMounted) return;
           isControllerInitializedRef.current = true;
+          controllerRef.current = controller;
           setIsIframeApiLoaded(true);
-          window.spotifyEmbedController = controller;
-          setSpotifyController?.(controller);
 
-          controller.addListener('playback_update', (e: any) => {
-            const { isPaused, position, duration: dur } = e.data || {};
-            if (typeof isPaused === 'boolean') {
-              // Context will sync via window message listener as well
-            }
+          // Register only plain function closures (never pass DOM node or controller object directly)
+          registerSpotifyController?.({
+            resume: () => {
+              try { controller.resume?.(); } catch {}
+            },
+            play: () => {
+              try { controller.play?.(); } catch {}
+            },
+            pause: () => {
+              try { controller.pause?.(); } catch {}
+            },
+            togglePlay: () => {
+              try { controller.togglePlay?.(); } catch {}
+            },
+            seek: (s: number) => {
+              try { controller.seek?.(s); } catch {}
+            },
+            loadUri: (u: string) => {
+              try { controller.loadUri?.(u); } catch {}
+            },
+          });
+
+          controller.addListener('playback_update', () => {
+            // Handled via window message listeners in PlaylistProvider
           });
 
           controller.addListener('ready', () => {
@@ -140,8 +159,9 @@ export const WinampApp: React.FC = () => {
 
     return () => {
       isMounted = false;
+      registerSpotifyController?.(null);
     };
-  }, [isSpotify, activePlaylist, playlistId, setSpotifyController]);
+  }, [isSpotify, activePlaylist, playlistId, registerSpotifyController]);
 
   // Winamp Transport Controls (Guaranteed user gesture execution for Spotify)
   const handlePlay = () => {
@@ -149,37 +169,19 @@ export const WinampApp: React.FC = () => {
     // 1. Fire Provider state and postMessage dispatch
     play();
 
-    // 2. Direct user-gesture execution on active controller or iframes
-    if (isSpotify) {
-      const ctrl = window.spotifyEmbedController;
-      if (ctrl) {
-        try {
-          if (typeof ctrl.resume === 'function') {
-            ctrl.resume();
-          } else if (typeof ctrl.play === 'function') {
-            ctrl.play();
-          } else if (typeof ctrl.togglePlay === 'function') {
-            ctrl.togglePlay();
-          }
-        } catch (e) {
-          console.warn('Error invoking Spotify controller play:', e);
+    // 2. Direct user-gesture execution on active controller
+    if (isSpotify && controllerRef.current) {
+      try {
+        if (typeof controllerRef.current.resume === 'function') {
+          controllerRef.current.resume();
+        } else if (typeof controllerRef.current.play === 'function') {
+          controllerRef.current.play();
+        } else if (typeof controllerRef.current.togglePlay === 'function') {
+          controllerRef.current.togglePlay();
         }
+      } catch (e) {
+        console.warn('Error invoking Spotify controller play:', e);
       }
-
-      // Direct postMessage to any Spotify iframe
-      const iframes = document.querySelectorAll<HTMLIFrameElement>('iframe[src*="spotify.com"]');
-      iframes.forEach((frame) => {
-        try {
-          frame.contentWindow?.postMessage({ command: 'resume' }, '*');
-          frame.contentWindow?.postMessage({ command: 'play' }, '*');
-          frame.contentWindow?.postMessage({ command: 'toggle' }, '*');
-          frame.contentWindow?.postMessage(JSON.stringify({ command: 'resume' }), '*');
-          frame.contentWindow?.postMessage(JSON.stringify({ command: 'play' }), '*');
-          frame.contentWindow?.postMessage(JSON.stringify({ command: 'toggle' }), '*');
-        } catch {
-          //
-        }
-      });
     }
   };
 
@@ -187,31 +189,16 @@ export const WinampApp: React.FC = () => {
     playMouseClick();
     pause();
 
-    if (isSpotify) {
-      const ctrl = window.spotifyEmbedController;
-      if (ctrl) {
-        try {
-          if (typeof ctrl.pause === 'function') {
-            ctrl.pause();
-          } else if (typeof ctrl.togglePlay === 'function') {
-            ctrl.togglePlay();
-          }
-        } catch (e) {
-          console.warn('Error invoking Spotify controller pause:', e);
+    if (isSpotify && controllerRef.current) {
+      try {
+        if (typeof controllerRef.current.pause === 'function') {
+          controllerRef.current.pause();
+        } else if (typeof controllerRef.current.togglePlay === 'function') {
+          controllerRef.current.togglePlay();
         }
+      } catch (e) {
+        console.warn('Error invoking Spotify controller pause:', e);
       }
-
-      const iframes = document.querySelectorAll<HTMLIFrameElement>('iframe[src*="spotify.com"]');
-      iframes.forEach((frame) => {
-        try {
-          frame.contentWindow?.postMessage({ command: 'pause' }, '*');
-          frame.contentWindow?.postMessage({ command: 'toggle' }, '*');
-          frame.contentWindow?.postMessage(JSON.stringify({ command: 'pause' }), '*');
-          frame.contentWindow?.postMessage(JSON.stringify({ command: 'toggle' }), '*');
-        } catch {
-          //
-        }
-      });
     }
   };
 
@@ -219,26 +206,13 @@ export const WinampApp: React.FC = () => {
     playMouseClick();
     stop();
 
-    if (isSpotify) {
-      const ctrl = window.spotifyEmbedController;
-      if (ctrl) {
-        try {
-          ctrl.pause?.();
-          ctrl.seek?.(0);
-        } catch (e) {
-          console.warn(e);
-        }
+    if (isSpotify && controllerRef.current) {
+      try {
+        controllerRef.current.pause?.();
+        controllerRef.current.seek?.(0);
+      } catch (e) {
+        console.warn(e);
       }
-
-      const iframes = document.querySelectorAll<HTMLIFrameElement>('iframe[src*="spotify.com"]');
-      iframes.forEach((frame) => {
-        try {
-          frame.contentWindow?.postMessage({ command: 'pause' }, '*');
-          frame.contentWindow?.postMessage(JSON.stringify({ command: 'pause' }), '*');
-        } catch {
-          //
-        }
-      });
     }
   };
 
