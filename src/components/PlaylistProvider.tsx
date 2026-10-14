@@ -2,8 +2,8 @@ import React, { createContext, useContext, useState, useEffect, useRef, useCallb
 import { PlaylistContextType, YouTubeTrack, PlaylistItem } from '../types';
 import { parseMediaInput, fetchSpotifyMetadata } from '../utils/mediaUrlParser';
 
-export const USER_SPOTIFY_PLAYLIST_ID = 'spotify_4LttUvcLoTtv3Ue54lyqkI';
-export const USER_SPOTIFY_PLAYLIST_TITLE = 'Forr aashii 🎀✨️';
+export const USER_SPOTIFY_PLAYLIST_ID = 'spotify_14rVcsdIVXNzB1Qwh5RzPD';
+export const USER_SPOTIFY_PLAYLIST_TITLE = 'ADD MORE!!';
 
 export const USER_SPOTIFY_PLAYLIST: PlaylistItem = {
   id: USER_SPOTIFY_PLAYLIST_ID,
@@ -11,9 +11,9 @@ export const USER_SPOTIFY_PLAYLIST: PlaylistItem = {
   isCustom: false,
   type: 'playlist',
   source: 'spotify',
-  spotifyUri: 'spotify:playlist:4LttUvcLoTtv3Ue54lyqkI',
-  canonicalUrl: 'https://open.spotify.com/playlist/4LttUvcLoTtv3Ue54lyqkI',
-  embedUrl: 'https://open.spotify.com/embed/playlist/4LttUvcLoTtv3Ue54lyqkI?utm_source=generator&theme=0',
+  spotifyUri: 'spotify:playlist:14rVcsdIVXNzB1Qwh5RzPD',
+  canonicalUrl: 'https://open.spotify.com/playlist/14rVcsdIVXNzB1Qwh5RzPD',
+  embedUrl: 'https://open.spotify.com/embed/playlist/14rVcsdIVXNzB1Qwh5RzPD?utm_source=generator&theme=0',
 };
 
 export const INITIAL_DEFAULT_PLAYLIST_ID = 'PLt4QqxffzV0D8YNJ0Xdh34CRifqctJ8ms';
@@ -55,7 +55,7 @@ export const usePlaylist = () => {
 const INITIAL_FALLBACK_TRACKS: YouTubeTrack[] = [
   {
     id: 'spotify_live',
-    title: 'Forr aashii 🎀✨️',
+    title: 'ADD MORE!!',
     artist: 'Spotify Stream',
     duration: 'Live',
     durationSec: 0,
@@ -67,7 +67,7 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [defaultPlaylistId, setDefaultPlaylistIdState] = useState<string>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_CUSTOM_DEFAULT_ID_KEY);
-      if (stored) return stored;
+      if (stored && stored !== 'spotify_4LttUvcLoTtv3Ue54lyqkI') return stored;
     } catch {
       // ignore
     }
@@ -81,9 +81,11 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const hasSpotify = parsed.some((p: PlaylistItem) => p.id === USER_SPOTIFY_PLAYLIST_ID);
-          const hasYouTube = parsed.some((p: PlaylistItem) => p.id === INITIAL_DEFAULT_PLAYLIST_ID);
-          let list = parsed;
+          // Filter out older replaced playlist and ensure current default is active
+          const filtered = parsed.filter((p: PlaylistItem) => p.id !== 'spotify_4LttUvcLoTtv3Ue54lyqkI');
+          const hasSpotify = filtered.some((p: PlaylistItem) => p.id === USER_SPOTIFY_PLAYLIST_ID);
+          const hasYouTube = filtered.some((p: PlaylistItem) => p.id === INITIAL_DEFAULT_PLAYLIST_ID);
+          let list = filtered;
           if (!hasSpotify) list = [USER_SPOTIFY_PLAYLIST, ...list];
           if (!hasYouTube) list = [...list, INITIAL_DEFAULT_PLAYLIST];
           return list;
@@ -99,9 +101,9 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [playlistId, setPlaylistId] = useState<string>(() => {
     try {
       const storedActive = sessionStorage.getItem(SESSION_ACTIVE_ID_KEY);
-      if (storedActive) return storedActive;
+      if (storedActive && storedActive !== 'spotify_4LttUvcLoTtv3Ue54lyqkI') return storedActive;
       const customDefault = localStorage.getItem(STORAGE_CUSTOM_DEFAULT_ID_KEY);
-      if (customDefault) return customDefault;
+      if (customDefault && customDefault !== 'spotify_4LttUvcLoTtv3Ue54lyqkI') return customDefault;
     } catch {
       // ignore
     }
@@ -122,7 +124,7 @@ export const PlaylistProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Spotify integration state
   const [sourceType, setSourceType] = useState<'youtube' | 'spotify'>('spotify');
   const [spotifyEmbedUrl, setSpotifyEmbedUrl] = useState<string | null>(
-    'https://open.spotify.com/embed/playlist/4LttUvcLoTtv3Ue54lyqkI?utm_source=generator&theme=0'
+    'https://open.spotify.com/embed/playlist/14rVcsdIVXNzB1Qwh5RzPD?utm_source=generator&theme=0'
   );
   
   // Keep only pure functions in ref (never store circular DOM elements or Fiber nodes)

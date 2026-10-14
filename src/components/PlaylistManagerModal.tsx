@@ -22,11 +22,11 @@ import { playMouseClick, playWindowsBalloon } from '../utils/audio';
 const CURATED_PRESETS = [
   {
     id: USER_SPOTIFY_PLAYLIST_ID,
-    title: 'Forr aashii 🎀✨️ (Spotify)',
+    title: 'ADD MORE!! (Spotify)',
     desc: 'Default Spotify playlist collection with embedded interactive player',
     badge: 'DEFAULT',
     source: 'spotify' as const,
-    embedUrl: 'https://open.spotify.com/embed/playlist/4LttUvcLoTtv3Ue54lyqkI?utm_source=generator&theme=0',
+    embedUrl: 'https://open.spotify.com/embed/playlist/14rVcsdIVXNzB1Qwh5RzPD?utm_source=generator&theme=0',
   },
   {
     id: INITIAL_DEFAULT_PLAYLIST_ID,
